@@ -17,15 +17,7 @@ pub struct MaxTurnsOperation {
     max_turns: u32,
 }
 
-fn turn_budget_part(turns_taken: u32, max_turns: u32) -> Option<String> {
-    if max_turns == 0 || turns_taken.saturating_mul(2) < max_turns {
-        return None;
-    }
-
-    Some(format!(
-        "<turn-budget>{turns_taken}/{max_turns} used</turn-budget>"
-    ))
-}
+use goose_agent::turn_context::turn_budget_part;
 
 impl MaxTurnsOperation {
     pub fn new(max_turns: u32) -> Self {

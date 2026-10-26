@@ -9,7 +9,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 use goose_agent::inference::{InferenceRequestPreparer, PreparedInferenceRequest};
 use goose_agent::operation::{messages_since_kickoff, InferenceInput};
-use goose_providers::conversation::message::Message;
 use goose_providers::conversation::Conversation;
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -67,19 +66,16 @@ impl InferenceRequestPreparer<Session> for GooseInferenceRequestPreparer<'_> {
             .and_then(|message| chrono::DateTime::from_timestamp(message.created, 0))
             .map(|timestamp| timestamp.with_timezone(&chrono::Local))
             .unwrap_or_else(chrono::Local::now);
-        let last = turn
-            .iter()
-            .rev()
-            .find(|message| message.is_turn_context())
-            .map(Message::as_concat_text);
         let context_limit = Some(self.context_limit);
-        let additional_messages = crate::agents::moim::turn_context_event(
-            &session.working_dir,
-            context_limit,
-            input.moim_parts,
-            turn_start,
+        let additional_messages = goose_agent::turn_context::update(
+            crate::agents::moim::turn_context_event(
+                &session.working_dir,
+                context_limit,
+                input.moim_parts,
+                turn_start,
+            ),
+            turn,
         )
-        .filter(|event| Some(event.as_concat_text()) != last)
         .into_iter()
         .collect();
         Ok(PreparedInferenceRequest {

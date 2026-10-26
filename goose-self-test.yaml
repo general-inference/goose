@@ -86,6 +86,8 @@ instructions: |
   ### Prompt Composition (test_phases: prompt-composition)
   The host captures the actual provider request and compares its identity, active
   developer instructions and repository context with the supplied configuration.
+  The host also verifies the tagged turn-context message contains the workspace
+  and stable turn timestamp; do not infer this from a correct answer alone.
   Report your active identity and available tools, then create a small text file
   and read it back using the developer tools. Do not run other phases when this
   phase alone is requested. Do not launch another Goose process or inspect parent

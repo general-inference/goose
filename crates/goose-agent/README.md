@@ -142,6 +142,16 @@ turn limits, approvals, cancellation and external verification in place.
 block for an answer or stop-hook context. It excludes earlier tool narration and
 hidden content; Goose's stop hooks use this same implementation.
 
+## Turn context
+
+`turn_context` exposes the same operational-context message and turn-budget rendering
+used by Goose. Hosts supply the workspace, model context limit, stable formatted
+timestamp and contextual parts; `turn_context_event` returns an agent-only message
+marked for persistence. `system_prompt_block` explains its meaning to the model.
+`update` suppresses unchanged blocks and refreshes context after goal review.
+Configuration, clock reads and extension leasing stay with the host. The shared implementation preserves Goose's small-context threshold
+and escapes workspace/time fields while retaining contributed text literally.
+
 ## Prompt composition
 
 Enable `prompt` for the system-prompt builder and template renderer used by Goose.
