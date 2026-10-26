@@ -249,18 +249,28 @@ fn get_line_context(content: &str, target_line: usize, context: usize) -> String
 }
 
 fn find_similar_context(content: &str, search: &str) -> Option<String> {
-    let first_line = search.lines().next()?.trim();
-    if first_line.is_empty() {
-        return None;
-    }
-
-    for (i, line) in content.lines().enumerate() {
-        if line.contains(first_line) || first_line.contains(line.trim()) {
-            return Some(get_line_context(content, i + 1, 2));
-        }
-    }
-
-    None
+    let mut search_lines = search.lines().skip_while(|line| line.trim().is_empty());
+    let first_line = search_lines.next()?.trim();
+    let block_lines = 1 + search_lines.take(NO_MATCH_PREVIEW_LINES - 1).count();
+    // An earlier blank or generic line must not hide an exact anchor farther down.
+    let anchor = content
+        .lines()
+        .position(|line| line.trim() == first_line)
+        .or_else(|| {
+            content.lines().position(|line| {
+                let line = line.trim();
+                !line.is_empty() && (line.contains(first_line) || first_line.contains(line))
+            })
+        })?;
+    let start = anchor.saturating_sub(2);
+    Some(
+        content
+            .lines()
+            .skip(start)
+            .take(anchor - start + block_lines + 2)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
 fn build_file_preview(content: &str, max_lines: usize) -> String {
