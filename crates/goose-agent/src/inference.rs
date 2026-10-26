@@ -45,6 +45,27 @@ pub trait InferenceRequestPreparer<S>: MaybeSend + MaybeSync {
     ) -> Result<PreparedInferenceRequest>;
 }
 
+/// The exact message projection and tool definitions about to be sent to a provider.
+pub struct InferenceRequest<'a> {
+    pub system_prompt: &'a str,
+    pub messages: &'a [Message],
+    pub tools: &'a [rmcp::model::Tool],
+}
+
+/// May replace context before inference. An applied result is persisted before
+/// another machine step prepares and sends a fresh request.
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+pub trait InferenceRequestGuard<S, E: MaybeSend + 'static>: MaybeSend + MaybeSync {
+    async fn before_inference(
+        &self,
+        session: &S,
+        conversation: &Conversation,
+        request: InferenceRequest<'_>,
+        emit: &Emitter,
+    ) -> Result<OperationResult<E>>;
+}
+
 pub struct IdentityInferenceRequestPreparer;
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
@@ -250,6 +271,7 @@ pub struct InferenceRunner<'a, S, E> {
     provider: Arc<dyn Provider>,
     model_config: ModelConfig,
     request_preparer: Arc<dyn InferenceRequestPreparer<S> + 'a>,
+    request_guard: Option<Arc<dyn InferenceRequestGuard<S, E> + 'a>>,
     output: Mutex<InferenceOutput>,
     effect: std::marker::PhantomData<fn() -> E>,
 }
@@ -346,6 +368,7 @@ impl<'a, S: MaybeSync, E: InferenceEffect> InferenceRunner<'a, S, E> {
             provider,
             model_config,
             request_preparer: Arc::new(IdentityInferenceRequestPreparer),
+            request_guard: None,
             output: Mutex::new(InferenceOutput::default()),
             effect: std::marker::PhantomData,
         }
@@ -356,6 +379,11 @@ impl<'a, S: MaybeSync, E: InferenceEffect> InferenceRunner<'a, S, E> {
         request_preparer: Arc<dyn InferenceRequestPreparer<S> + 'a>,
     ) -> Self {
         self.request_preparer = request_preparer;
+        self
+    }
+
+    pub fn with_request_guard(mut self, guard: Arc<dyn InferenceRequestGuard<S, E> + 'a>) -> Self {
+        self.request_guard = Some(guard);
         self
     }
 
@@ -464,6 +492,26 @@ impl<S: MachineSession, E: InferenceEffect> Inference<S, E> for InferenceRunner<
             for message in &additional_messages {
                 messages_for_provider.push(message.clone());
             }
+
+            let projected =
+                Conversation::new_unvalidated(messages_for_provider).agent_visible_messages();
+            let (fixed, _) = fix_conversation(Conversation::new_unvalidated(projected));
+            let conversation_for_provider = Conversation::new_unvalidated(
+                merge_consecutive_messages_for_request(fixed.messages().clone()),
+            );
+            if let Some(guard) = &self.request_guard {
+                let request = InferenceRequest {
+                    system_prompt: &system_prompt,
+                    messages: conversation_for_provider.messages(),
+                    tools: &tools,
+                };
+                // Unsent additions are prepared again after a history replacement;
+                // they must not become the user request preserved by compaction.
+                match guard.before_inference(session, conversation, request, emit).await? {
+                    OperationResult::NotApplicable => {},
+                    result => return Ok(result),
+                }
+            }
             self.output().additional_messages = additional_messages;
 
             let provider_name = self.provider.get_name();
@@ -477,12 +525,6 @@ impl<S: MachineSession, E: InferenceEffect> Inference<S, E> for InferenceRunner<
                 }
             }
 
-            let projected =
-                Conversation::new_unvalidated(messages_for_provider).agent_visible_messages();
-            let (fixed, _) = fix_conversation(Conversation::new_unvalidated(projected));
-            let conversation_for_provider = Conversation::new_unvalidated(
-                merge_consecutive_messages_for_request(fixed.messages().clone()),
-            );
             let successful_tool_response =
                 ends_with_successful_tool_response(conversation.messages());
             let mut empty_responses = 0;

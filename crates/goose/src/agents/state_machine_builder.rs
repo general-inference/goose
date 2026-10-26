@@ -96,15 +96,16 @@ pub(crate) fn build_state_machine(
         Arc::new(SteerOperation::new(steer_queue, hook_manager.clone())),
         Arc::new(BangShellOperation::new()),
     ];
-    if !manages_own_context {
-        operations.push(Arc::new(
-            crate::agents::state_machine::compaction_operation(
-                provider.clone(),
-                model_config.clone(),
-                context_limit,
-                compaction_threshold,
-            ),
-        ));
+    let compaction = (!manages_own_context).then(|| {
+        Arc::new(crate::agents::state_machine::compaction_operation(
+            provider.clone(),
+            model_config.clone(),
+            context_limit,
+            compaction_threshold,
+        ))
+    });
+    if let Some(operation) = &compaction {
+        operations.push(operation.clone());
     }
     let remaining_operations: Vec<Arc<dyn Operation<Session, GooseEffect> + '_>> = vec![
         Arc::new(ToolPairCompactionOperation::new(
@@ -131,10 +132,12 @@ pub(crate) fn build_state_machine(
     };
     let status_operation = Arc::new(StatusOperation::new(provider.clone(), model_config.clone()));
     let inference_provider = Arc::new(GooseInferenceProvider::new(provider));
-    let inference = Arc::new(
-        InferenceRunner::new(inference_provider, model_config)
-            .with_request_preparer(Arc::new(request_preparer)),
-    );
+    let mut inference = InferenceRunner::new(inference_provider, model_config)
+        .with_request_preparer(Arc::new(request_preparer));
+    if let Some(compaction) = compaction {
+        inference = inference.with_request_guard(compaction);
+    }
+    let inference = Arc::new(inference);
     let mut command_handlers = operations.clone();
     command_handlers.push(status_operation);
     let command_operation: Arc<dyn Operation<Session, GooseEffect> + '_> =

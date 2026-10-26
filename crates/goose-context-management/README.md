@@ -55,3 +55,23 @@ wrapper type.
 Python and Kotlin reach compaction through [`goose-sdk`](../goose-sdk), which
 wraps this crate in its UniFFI bindings. The trait-based `compact` API is Rust
 only.
+
+## Full conversation compaction (Rust)
+
+`conversation::compact_messages` applies Goose's complete history transformation:
+it preserves the original transcript, hides archived content from the model,
+inserts the summary and continuation, and retains the current user request and
+turn context for automatic compaction. It accepts `CompactionModel`, an optional
+`TokenEstimator`, templates, a `Conversation`, and the manual/automatic flag.
+The result contains the replacement conversation, billable summarization usage,
+and an estimate of retained context. Persist the entire result before continuing.
+
+The optional `token-counter` feature exposes Goose's cached `TokenCounter` and its
+`TokenEstimator` implementation. `count_request_tokens` includes system text,
+messages, and tool definitions. Keep one counter alive across requests to reuse
+its cache. Neither the transformation nor a custom estimator requires the
+built-in tokenizer feature.
+
+Automatic triggering and bounded overflow recovery are available through
+`goose-agent`'s native `context-management` feature. These APIs are Rust APIs;
+this extraction does not add new Python or Kotlin bindings.

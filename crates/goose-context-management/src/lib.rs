@@ -7,6 +7,8 @@
 //! * [`compact`] - the trait-based API ([`CompactionInput`] /
 //!   [`CompactionOutput`]) letting a caller read from and write back to its own
 //!   conversation representation. Rust only.
+//! * [`conversation::compact_messages`] - archive and rewrite a complete conversation
+//!   while preserving its transcript, current request, and turn context. Rust only.
 //!
 //! Cross-language (Python/Kotlin) access is exposed by `goose-sdk`, which
 //! wraps this crate in its uniffi bindings.

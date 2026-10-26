@@ -5,6 +5,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 
+use crate::inference::{InferenceRequest, InferenceRequestGuard};
 use crate::operation::{
     applied, last_effective_role, messages_since_kickoff, not_applicable, trailing_error,
     yielded_with, ConversationEffect, Emitter, Operation, OperationResult, SlashCommand,
@@ -140,6 +141,40 @@ impl<S: CompactionSession> CompactionOperation<S> {
         }
     }
 
+    async fn perform_compaction<E: CompactionEffect>(
+        &self,
+        session: &S,
+        conversation: &Conversation,
+        emit: &Emitter,
+    ) -> Result<OperationResult<E>> {
+        let threshold_k_tokens = (self.context_limit as f64 * self.threshold / 1000.0) as usize;
+        emit.message(Message::assistant().with_system_notification(
+            SystemNotificationType::InlineMessage,
+            format!(
+                "Exceeded auto-compact threshold of {threshold_k_tokens}k tokens. \
+                     Performing auto-compaction..."
+            ),
+        ));
+        emit.message(Message::assistant().with_system_notification(
+            SystemNotificationType::ThinkingMessage,
+            COMPACTION_THINKING_TEXT,
+        ));
+
+        match self.compactor.compact(session, conversation, false).await {
+            Ok(result) => {
+                emit.message(Message::assistant().with_system_notification(
+                    SystemNotificationType::InlineMessage,
+                    "Compaction complete",
+                ));
+                applied([E::compact_conversation(result)])
+            }
+            Err(e) => {
+                let message = emit.message(compaction_failure_message(&e));
+                yielded_with([message.into()])
+            }
+        }
+    }
+
     fn command_error<E: CompactionEffect>(
         conversation: &Conversation,
         message: String,
@@ -257,6 +292,9 @@ impl<S: CompactionSession, E: CompactionEffect> Operation<S, E> for CompactionOp
             if last_effective_role(messages)? == EffectiveRole::Assistant {
                 return not_applicable();
             }
+            if just_compacted(conversation) {
+                return not_applicable();
+            }
             let tokens = self.context_tokens(session, conversation).await?;
             if tokens <= 0 || !self.over_threshold(tokens as usize) {
                 return not_applicable();
@@ -276,32 +314,43 @@ impl<S: CompactionSession, E: CompactionEffect> Operation<S, E> for CompactionOp
             conversation
         };
 
-        let threshold_k_tokens = (self.context_limit as f64 * self.threshold / 1000.0) as usize;
-        emit.message(Message::assistant().with_system_notification(
-            SystemNotificationType::InlineMessage,
-            format!(
-                "Exceeded auto-compact threshold of {threshold_k_tokens}k tokens. \
-                     Performing auto-compaction..."
-            ),
-        ));
-        emit.message(Message::assistant().with_system_notification(
-            SystemNotificationType::ThinkingMessage,
-            COMPACTION_THINKING_TEXT,
-        ));
+        self.perform_compaction(session, conversation, emit).await
+    }
+}
 
-        match self.compactor.compact(session, conversation, false).await {
-            Ok(result) => {
-                emit.message(Message::assistant().with_system_notification(
-                    SystemNotificationType::InlineMessage,
-                    "Compaction complete",
-                ));
-                applied([E::compact_conversation(result)])
-            }
-            Err(e) => {
-                let message = emit.message(compaction_failure_message(&e));
-                yielded_with([message.into()])
-            }
+// A large prompt, tool schema, or irreducible summary must not cause an endless
+// proactive loop. Try inference once, then use the bounded overflow recovery.
+fn just_compacted(conversation: &Conversation) -> bool {
+    conversation
+        .messages()
+        .iter()
+        .rev()
+        .find(|message| !message.is_turn_context())
+        .is_some_and(goose_context_management::conversation::is_compaction_message)
+}
+
+#[async_trait]
+impl<S: CompactionSession, E: CompactionEffect> InferenceRequestGuard<S, E>
+    for CompactionOperation<S>
+{
+    async fn before_inference(
+        &self,
+        session: &S,
+        conversation: &Conversation,
+        request: InferenceRequest<'_>,
+        emit: &Emitter,
+    ) -> Result<OperationResult<E>> {
+        if just_compacted(conversation) {
+            return not_applicable();
         }
+        let tokens = self
+            .estimator
+            .count_request_tokens(request.system_prompt, request.messages, request.tools)
+            .await;
+        if !self.over_threshold(tokens) {
+            return not_applicable();
+        }
+        self.perform_compaction(session, conversation, emit).await
     }
 }
 

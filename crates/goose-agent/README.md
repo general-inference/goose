@@ -103,3 +103,25 @@ from JavaScript. Some things differ from native:
 
 The reference assembly of these pieces is `goose::agents::state_machine` in the
 [`goose`](../goose) crate.
+
+## Context management (native Rust)
+
+Enable `context-management` to use `compaction::CompactionOperation`.
+Supply `ModelCompactor` with a `CompactionModel`, a shared `TokenEstimator`, and
+prompt templates, or implement `SessionCompactor` for session-specific model
+selection. `CompactionSession` supplies optional previously reported usage;
+`CompactionEffect` lets the host persist the replacement conversation and
+summarization usage together. Register the operation only when the provider
+does not manage its own context.
+
+Use the same operation with `InferenceRunner::with_request_guard`. The operation
+handles manual compaction and bounded context-overflow recovery; the request guard
+also accounts for the fully prepared system prompt, message projection, and tool
+schemas before sending inference. A guard that applies returns effects for the
+state machine to persist before it prepares another request.
+
+Compaction marks generated messages in their persisted operation metadata.
+`assistant_turn_count` excludes those messages, and proactive compaction will not
+repeat on an unchanged compacted tail. An irreducibly large request is attempted
+once and then follows bounded overflow recovery. Token counts remain estimates;
+this cannot guarantee that a provider accepts a request.

@@ -179,6 +179,21 @@ impl goose_context_management::TokenEstimator for GooseTokenEstimator {
         }
     }
 
+    async fn count_request_tokens(
+        &self,
+        system: &str,
+        messages: &[Message],
+        tools: &[rmcp::model::Tool],
+    ) -> usize {
+        match self.counter.get_or_try_init(create_token_counter).await {
+            Ok(counter) => counter.count_chat_tokens(system, messages, tools),
+            Err(error) => {
+                warn!("Failed to create token counter: {error}");
+                0
+            }
+        }
+    }
+
     async fn count_text_tokens(&self, text: &str) -> usize {
         match self.counter.get_or_try_init(create_token_counter).await {
             Ok(counter) => counter.count_tokens(text),

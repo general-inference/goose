@@ -61,6 +61,10 @@ pub fn assistant_turn_count(messages: &[Message]) -> u32 {
     let mut turns = 0;
     let mut in_assistant_block = false;
     for message in messages.iter().rev() {
+        #[cfg(all(feature = "context-management", not(target_arch = "wasm32")))]
+        if goose_context_management::conversation::is_compaction_message(message) {
+            continue;
+        }
         if message.role == rmcp::model::Role::Assistant {
             if !in_assistant_block {
                 turns += 1;
