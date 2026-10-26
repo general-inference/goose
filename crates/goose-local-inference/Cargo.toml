@@ -20,6 +20,7 @@ hf-hub = [
     "dep:futures",
     "dep:goose-download-manager",
     "dep:goose-sdk-types",
+    "goose-sdk-types/acp",
     "dep:hf-hub",
 ]
 
