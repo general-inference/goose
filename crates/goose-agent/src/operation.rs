@@ -46,6 +46,21 @@ pub fn messages_since_kickoff(conversation: &Conversation) -> Result<&[Message]>
     Ok(&messages[start..])
 }
 
+/// User-visible text from the final contiguous assistant block, excluding earlier
+/// tool narration and hidden content. Shared with Goose stop-hook context.
+pub fn trailing_assistant_text(messages: &[Message]) -> String {
+    messages
+        .iter()
+        .rev()
+        .take_while(|message| message.role == rmcp::model::Role::Assistant)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .filter(|message| message.is_user_visible())
+        .map(|message| message.user_visible_content().as_concat_text())
+        .collect()
+}
+
 pub fn trailing_error(conversation: &Conversation) -> Option<MessageErrorKind> {
     conversation.last().and_then(Message::error_kind)
 }

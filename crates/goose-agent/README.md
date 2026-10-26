@@ -137,3 +137,7 @@ model errors and pending tool requests are not converted into reviews.
 
 This is model self-review, not independent proof of task success. Keep the host's
 turn limits, approvals, cancellation and external verification in place.
+
+`operation::trailing_assistant_text` selects the user-visible final assistant
+block for an answer or stop-hook context. It excludes earlier tool narration and
+hidden content; Goose's stop hooks use this same implementation.
