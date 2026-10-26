@@ -201,8 +201,8 @@ pub fn truncation_error_message(args: &str) -> Option<String> {
     };
 
     let guidance = if is_truncated {
-        "The model's response was truncated — it hit the output token limit while generating this tool call. \
-         Try increasing max_tokens for this provider or breaking the task into smaller steps."
+        "The model returned incomplete tool arguments. Retry the tool call with a complete JSON object, \
+         or split large arguments into smaller steps. Incomplete JSON alone does not establish an output token limit."
     } else {
         "The model produced malformed tool arguments. Try resending your message or breaking the task into smaller steps."
     };
@@ -467,7 +467,8 @@ mod tests {
         let truncated = r##"{"path":"/report.md","content":"# Big report that got cut"##;
         let msg =
             truncation_error_message(truncated).expect("truncated args should produce an error");
-        assert!(msg.contains("truncated"), "msg: {msg}");
+        assert!(msg.contains("incomplete tool arguments"), "msg: {msg}");
+        assert!(!msg.contains("hit the output token limit"), "msg: {msg}");
         assert!(
             msg.contains("max_tokens") || msg.contains("smaller steps"),
             "msg: {msg}"
