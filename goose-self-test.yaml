@@ -172,6 +172,28 @@ prompt: |
   - [ ] Set up logging infrastructure
   - [ ] Begin Phase 1 testing
 
+  {% if test_phases == "all" or "project-context" in test_phases %}
+  ## Repository Instructions Through GDK
+
+  Follow the Repository Context instructions above and record observations in
+  {{ workspace_dir }}/project_context.md. If the launch workspace already has
+  instruction markers, first report the markers supplied in your project hints
+  without reading instruction files. Read a normal file under a directory with
+  nested AGENTS.md, then report the newly supplied nested marker on the next turn.
+  Distinguish hints supplied in context from contents you explicitly read. Once an
+  instruction file has been read, do not claim that its content proves automatic
+  injection. Do not inspect parent directories, host runners, expected-answer files
+  or earlier reports to infer the result. The host owns the restore probe; do not
+  launch another Goose instance or run the host's scripts yourself.
+
+  Run the shared loader's project_context tests and the native hints tests from
+  the Goose checkout when available. Preserve their actual outputs. Do not claim
+  that passing unit tests proves a live session reload; report reload as unverified
+  unless the host resumes the same persisted conversation and checks it separately.
+  Mark any unavailable check as unverified, not passed. Do not modify source files
+  in the Goose checkout. Keep new fixtures and reports in the requested test workspace.
+  {% endif %}
+
   {% if test_phases == "all" or "basic" in test_phases %}
   ## 📝 PHASE 1: Basic Tool Validation
 
