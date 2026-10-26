@@ -1,0 +1,185 @@
+use crate::{summarize, CompactionModel, Templates, TokenEstimator};
+use anyhow::Result;
+use goose_provider_types::conversation::message::{Message, MessageContent, MessageMetadata};
+use goose_provider_types::conversation::token_usage::ProviderUsage;
+use goose_provider_types::conversation::{merge_consecutive_messages, Conversation};
+use tracing::info;
+
+const CONVERSATION_CONTINUATION_TEXT: &str =
+    include_str!("prompts/conversation_continuation_text.md");
+
+const TOOL_LOOP_CONTINUATION_TEXT: &str = include_str!("prompts/tool_loop_continuation_text.md");
+
+const MANUAL_COMPACT_CONTINUATION_TEXT: &str =
+    include_str!("prompts/manual_compact_continuation_text.md");
+
+pub struct CompactionResult {
+    pub conversation: Conversation,
+    /// Billable usage of the summarization call, counting the raw model
+    /// output even when it is rewritten to the rendered structured summary.
+    pub usage: ProviderUsage,
+    /// Estimated tokens of the agent-visible context retained after
+    /// compaction. Smaller than the billable output when the raw response was
+    /// rewritten to the rendered structured summary.
+    pub retained_context_tokens: i32,
+}
+
+/// Summarize the visible history, archive the original messages, and preserve
+/// the active user request and turn context for automatic compaction.
+/// The caller persists the returned conversation and billable usage together.
+pub async fn compact_messages(
+    model: &dyn CompactionModel,
+    estimator: Option<&dyn TokenEstimator>,
+    templates: &Templates,
+    conversation: &Conversation,
+    manual_compact: bool,
+) -> Result<CompactionResult> {
+    info!("Performing message compaction");
+
+    let messages = conversation.messages();
+
+    let has_text_only = |msg: &Message| {
+        let has_text = msg
+            .content
+            .iter()
+            .any(|c| matches!(c, MessageContent::Text(_)));
+        let has_tool_content = msg.content.iter().any(|c| {
+            matches!(
+                c,
+                MessageContent::ToolRequest(_) | MessageContent::ToolResponse(_)
+            )
+        });
+        has_text && !has_tool_content
+    };
+
+    // Turn-context events are agent-appended, never the message to preserve.
+    let (preserved_user_message, preserved_idx, is_most_recent) = if !manual_compact {
+        let found_msg = messages.iter().enumerate().rev().find_map(|(idx, msg)| {
+            if !msg.is_agent_visible()
+                || msg.is_turn_context()
+                || !matches!(msg.role, rmcp::model::Role::User)
+            {
+                return None;
+            }
+
+            let projected = msg.agent_visible_content();
+            if !has_text_only(&projected) {
+                return None;
+            }
+
+            let preserved = projected
+                .content
+                .into_iter()
+                .filter(|content| matches!(content, MessageContent::Text(_)))
+                .fold(
+                    Message::user().with_metadata(MessageMetadata::agent_only()),
+                    Message::with_content,
+                );
+            Some((idx, preserved))
+        });
+
+        if let Some((idx, msg)) = found_msg {
+            let is_last = messages[idx + 1..].iter().all(Message::is_turn_context);
+            (Some(msg), Some(idx), is_last)
+        } else {
+            (None, None, false)
+        }
+    } else {
+        (None, None, false)
+    };
+
+    let messages_to_compact = messages.as_slice();
+
+    let visible = Conversation::new_unvalidated(
+        messages_to_compact
+            .iter()
+            .filter(|message| !message.is_turn_context())
+            .cloned(),
+    )
+    .agent_visible_messages();
+    let summary = summarize(model, estimator, templates, &visible).await?;
+    let summary_message = summary.message;
+    let summarization_usage = summary.usage;
+
+    // Create the final message list with updated visibility metadata:
+    // 1. Original messages become user_visible but not agent_visible
+    // 2. Summary message becomes agent_visible but not user_visible
+    // 3. Assistant messages to continue the conversation are also agent_visible but not user_visible
+    let mut final_messages = Vec::new();
+
+    for msg in messages_to_compact {
+        let updated_metadata = msg.metadata.clone().with_agent_invisible();
+        let updated_msg = msg.clone().with_metadata(updated_metadata);
+        final_messages.push(updated_msg);
+    }
+
+    let summary_msg = summary_message.with_metadata(MessageMetadata::agent_only());
+
+    let mut continuation_messages = vec![summary_msg];
+
+    let continuation_text = if manual_compact {
+        MANUAL_COMPACT_CONTINUATION_TEXT
+    } else if is_most_recent {
+        CONVERSATION_CONTINUATION_TEXT
+    } else {
+        TOOL_LOOP_CONTINUATION_TEXT
+    };
+
+    let continuation_msg = Message::assistant()
+        .with_text(continuation_text.trim_end())
+        .with_metadata(MessageMetadata::agent_only());
+    let continuation_created = continuation_msg.created;
+    continuation_messages.push(continuation_msg);
+
+    let (merged_continuation, _issues) = merge_consecutive_messages(continuation_messages);
+    final_messages.extend(merged_continuation);
+
+    if let Some(mut user_msg) = preserved_user_message {
+        user_msg.created = continuation_created;
+        final_messages.push(user_msg);
+    }
+
+    // Carry the turn's own context event (it follows the preserved prompt) so
+    // a mid-turn retry keeps it; anything earlier belongs to a previous turn.
+    if let Some(carry_from) = preserved_idx.map(|idx| idx + 1) {
+        if let Some(turn_context) = messages_to_compact[carry_from..]
+            .iter()
+            .rev()
+            .find(|msg| msg.is_turn_context() && msg.is_agent_visible())
+        {
+            let mut carried = turn_context.clone();
+            carried.id = None;
+            // Storage reloads order by created_timestamp; the copy must keep
+            // its appended position, not resurface at the original event's time.
+            if let Some(latest) = final_messages.iter().map(|msg| msg.created).max() {
+                carried.created = carried.created.max(latest);
+            }
+            final_messages.push(carried);
+        }
+    }
+
+    let conversation = Conversation::new_unvalidated(final_messages);
+    let retained_context_tokens = if let Some(estimator) = estimator {
+        let mut total = 0usize;
+        for message in conversation
+            .messages()
+            .iter()
+            .filter(|message| message.is_agent_visible())
+        {
+            total = total.saturating_add(
+                estimator
+                    .count_chat_tokens("", std::slice::from_ref(message))
+                    .await,
+            );
+        }
+        total.try_into()?
+    } else {
+        summarization_usage.usage.output_tokens.unwrap_or(0)
+    };
+
+    Ok(CompactionResult {
+        conversation,
+        usage: summarization_usage,
+        retained_context_tokens,
+    })
+}

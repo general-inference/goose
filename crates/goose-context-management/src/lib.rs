@@ -11,6 +11,7 @@
 //! Cross-language (Python/Kotlin) access is exposed by `goose-sdk`, which
 //! wraps this crate in its uniffi bindings.
 
+pub mod conversation;
 pub mod format;
 pub mod model;
 pub mod provider;
