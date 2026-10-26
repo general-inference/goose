@@ -2,7 +2,6 @@
 use chrono::DateTime;
 use chrono::Utc;
 use indexmap::IndexMap;
-use serde::Serialize;
 
 use crate::agents::{extension::ExtensionInfo, moim};
 use crate::hints::load_hints::build_gitignore;
@@ -11,7 +10,6 @@ use crate::session::Session;
 use crate::{
     config::{Config, GooseMode},
     prompt_template,
-    utils::sanitize_unicode_tags,
 };
 use std::path::Path;
 
@@ -23,18 +21,6 @@ impl Default for PromptManager {
     fn default() -> Self {
         PromptManager::new()
     }
-}
-
-#[derive(Serialize)]
-struct SystemPromptContext {
-    extensions: Vec<ExtensionInfo>,
-    current_date_time: String,
-    goose_mode: GooseMode,
-    is_autonomous: bool,
-    code_execution_mode: bool,
-    include_extensions: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    moim_system_prompt_block: Option<String>,
 }
 
 pub struct SystemPromptBuilder<'a, M> {
@@ -105,69 +91,27 @@ impl<'a> SystemPromptBuilder<'a, PromptManager> {
     }
 
     pub fn build(self) -> anyhow::Result<String> {
-        let mut extensions_info = self.extensions_info;
-
-        // Stable tool ordering is important for multi session prompt caching.
-        extensions_info.sort_by(|a, b| a.name.cmp(&b.name));
-
-        let sanitized_extensions_info: Vec<ExtensionInfo> = extensions_info
-            .into_iter()
-            .map(|mut ext_info| {
-                ext_info.instructions = sanitize_unicode_tags(&ext_info.instructions);
-                ext_info
-            })
-            .collect();
-
-        let goose_mode = self
+        let mode = self
             .goose_mode
             .unwrap_or_else(|| Config::global().get_goose_mode().unwrap_or_default());
-
-        let context = SystemPromptContext {
-            extensions: sanitized_extensions_info,
-            current_date_time: self.manager.current_date_timestamp.clone(),
-            goose_mode,
-            is_autonomous: goose_mode == GooseMode::Auto,
-            code_execution_mode: self.code_execution_mode,
-            include_extensions: self.include_extensions,
-            moim_system_prompt_block: moim::system_prompt_block(),
+        let template = match self.system_prompt_override {
+            Some(template) => template,
+            None => prompt_template::template_source("system.md")?,
         };
-
-        let base_prompt = if let Some(override_prompt) = &self.system_prompt_override {
-            let sanitized_override_prompt = sanitize_unicode_tags(override_prompt);
-            prompt_template::render_string(&sanitized_override_prompt, &context)
-        } else {
-            prompt_template::render_template("system.md", &context)
+        let mut builder = goose_agent::prompt::SystemPromptBuilder::new(
+            &template,
+            &self.manager.current_date_timestamp,
+            mode,
+        )
+        .with_extensions(self.extensions_info)
+        .with_prompt_extras(self.prompt_extras)
+        .with_hints(self.hints)
+        .with_code_execution_mode(self.code_execution_mode)
+        .with_moim_block(moim::system_prompt_block());
+        if !self.include_extensions {
+            builder = builder.without_extensions();
         }
-        .map_err(|error| anyhow::anyhow!("Could not render system prompt: {error}"))?;
-
-        let mut system_prompt_extras = self.prompt_extras;
-
-        if let Some(hints) = self.hints {
-            system_prompt_extras.insert("hints".to_string(), hints);
-        }
-
-        if goose_mode == GooseMode::Chat {
-            system_prompt_extras.insert(
-                "chat_mode".to_string(),
-                "Right now you are in the chat only mode, no access to any tool use and system."
-                    .to_string(),
-            );
-        }
-
-        if system_prompt_extras.is_empty() {
-            Ok(base_prompt)
-        } else {
-            let sanitized_system_prompt_extras: Vec<String> = system_prompt_extras
-                .into_values()
-                .map(|extra| sanitize_unicode_tags(&extra))
-                .collect();
-
-            Ok(format!(
-                "{}\n\n# Additional Instructions:\n\n{}",
-                base_prompt,
-                sanitized_system_prompt_extras.join("\n\n")
-            ))
-        }
+        builder.build()
     }
 }
 

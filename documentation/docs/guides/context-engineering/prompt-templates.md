@@ -90,7 +90,7 @@ The following default templates can be customized.
 
 | Template | Description | Applies To |
 |----------|-------------|------------|
-| [system.md](https://github.com/aaif-goose/goose/blob/main/crates/goose/src/prompts/system.md) | General system prompt defining goose's role, capabilities, and response format | Desktop and CLI |
+| [system.md](https://github.com/aaif-goose/goose/blob/main/crates/goose-agent/prompts/system.md) | General system prompt defining goose's role, capabilities, and response format | Desktop and CLI |
 | [apps_create.md](https://github.com/aaif-goose/goose/blob/main/crates/goose/src/prompts/apps_create.md) | Prompt for generating new standalone apps (in development) | Desktop only |
 | [apps_iterate.md](https://github.com/aaif-goose/goose/blob/main/crates/goose/src/prompts/apps_iterate.md) | Prompt for updating existing standalone apps (in development) | Desktop only |
 | [compaction.md](https://github.com/aaif-goose/goose/blob/main/crates/goose/src/prompts/compaction.md) | Prompt for summarizing conversation history when context limits are reached | Desktop and CLI |

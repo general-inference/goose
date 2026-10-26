@@ -13,3 +13,6 @@ pub mod permission;
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "project-context"))]
 pub mod project_context;
+
+#[cfg(feature = "prompt")]
+pub mod prompt;

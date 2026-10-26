@@ -26,6 +26,8 @@ tracing-futures = { workspace = true }
 serde.workspace = true
 regex = { workspace = true, features = ["unicode-perl"] }
 goose-sdk-types = { version = "0.1.0-alpha.13", path = "../goose-sdk-types", default-features = false }
+minijinja = { version = "2.18", default-features = false, features = ["loader", "multi_template", "serde", "builtins"], optional = true }
+indexmap = { version = "2.9", default-features = false, features = ["serde", "std"], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 rmcp = { workspace = true, features = ["local"] }
@@ -38,6 +40,7 @@ test-case.workspace = true
 context-management = ["dep:goose-context-management"]
 permissions = ["dep:fs2", "dep:tempfile"]
 project-context = ["dep:ignore", "dep:shell-words", "dep:libc"]
+prompt = ["dep:minijinja", "dep:indexmap"]
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 js-sys = "0.3.105"

@@ -8,6 +8,7 @@ activities:
   - Initialize test workspace and logging infrastructure
   - Test file operations (create, read, update, delete, undo)
   - Validate shared GDK repository hints and host filesystem access
+  - Validate shared GDK prompt composition with explicit host inputs
   - Validate shell command execution and error handling
   - Validate Azure AI Foundry provider routing and deployment aliases
   - Validate the configurable Databricks AI Gateway path across all inference routes
@@ -30,7 +31,7 @@ parameters:
     input_type: string
     requirement: optional
     default: "all"
-    description: "Which test phases to run: all, basic, extensions, delegation, code-mode, project-context, declared-vision, reasoning, zai-coding-plan, acp-effort, compaction, advanced"
+    description: "Which test phases to run: all, basic, extensions, delegation, code-mode, project-context, prompt-composition, declared-vision, reasoning, zai-coding-plan, acp-effort, compaction, advanced"
 
   - key: test_depth
     input_type: string
@@ -81,6 +82,17 @@ instructions: |
   - Shell command execution
   - Code analysis capabilities
   - Error handling and recovery
+
+  ### Prompt Composition (test_phases: prompt-composition)
+  The host captures the actual provider request and compares its identity, active
+  developer instructions and repository context with the supplied configuration.
+  Report your active identity and available tools, then create a small text file
+  and read it back using the developer tools. Do not run other phases when this
+  phase alone is requested. Do not launch another Goose process or inspect parent
+  directories or host runner files. A correct answer or an explicit read does not
+  prove automatic prompt injection; the host checks the captured system prompt.
+  Unicode sanitization, contribution ordering, template errors and the tool-free
+  Chat mode are covered by deterministic tests, not by your self-report.
 
   ### Repository Context (test_phases: project-context)
   In an isolated workspace, create AGENTS.md importing a normal Markdown file and

@@ -541,22 +541,7 @@ impl std::fmt::Display for ExtensionConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct ExtensionInfo {
-    pub name: String,
-    pub instructions: String,
-    pub has_resources: bool,
-}
-
-impl ExtensionInfo {
-    pub fn new(name: &str, instructions: &str, has_resources: bool) -> Self {
-        Self {
-            name: name.to_string(),
-            instructions: instructions.to_string(),
-            has_resources,
-        }
-    }
-}
+pub use goose_agent::prompt::ExtensionInfo;
 
 fn deserialize_null_with_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where

@@ -142,6 +142,25 @@ turn limits, approvals, cancellation and external verification in place.
 block for an answer or stop-hook context. It excludes earlier tool narration and
 hidden content; Goose's stop hooks use this same implementation.
 
+## Prompt composition
+
+Enable `prompt` for the system-prompt builder and template renderer used by Goose.
+`prompt::SystemPromptBuilder` accepts explicit template text, time, permission mode,
+extension instructions and ordered operation contributions. Hosts load configuration,
+custom templates and repository hints through their own policies; the builder does
+not read files or environment variables. `SYSTEM_TEMPLATE` is Goose's built-in
+Markdown template; another host can supply its own identity template.
+
+Extension instructions, the base template and appended contributions receive Goose's
+Unicode-tag sanitization. Contributions are appended as literal data, not parsed as
+another template. Duplicate contribution keys replace values without moving their
+position; supplied root hints replace the `hints` entry. Chat mode adds the native
+no-tools instruction. A host with its own tool catalog should use
+`without_extensions()` and pass its operation contributions explicitly.
+
+`prompt::render` preserves Goose's whitespace rules and `code_fence` filter for other
+Markdown templates. It renders only supplied data and does not load template paths.
+
 ## Repository instructions
 
 The native `project-context` feature exposes Goose's hint loader through

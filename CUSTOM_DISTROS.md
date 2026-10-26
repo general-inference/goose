@@ -260,7 +260,7 @@ module.exports = {
 };
 ```
 
-3. **Update the system prompt** to reflect your branding in `crates/goose/src/prompts/system.md`:
+3. **Update the system prompt** to reflect your branding in `crates/goose-agent/prompts/system.md`:
 
 ```markdown
 You are an AI assistant called [YourName], created by [YourCompany].
