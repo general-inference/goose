@@ -390,7 +390,8 @@ impl<'a, S: MaybeSync, E: InferenceEffect> InferenceRunner<'a, S, E> {
     }
 
     /// Whether an empty response after a successful tool may finish the turn.
-    /// Disable this when the host requires an explicit final answer; retries only
+    /// Disable this when the host requires an explicit final answer or tool action,
+    /// rather than reasoning alone. Retries only
     /// repeat inference, never the already executed tool.
     pub fn with_empty_response_after_tools(mut self, allowed: bool) -> Self {
         self.allow_empty_after_tools = allowed;
@@ -608,7 +609,13 @@ impl<S: MachineSession, E: InferenceEffect> Inference<S, E> for InferenceRunner<
                     .accumulator
                     .iter()
                     .any(|message| message.metadata.output_token_limit_reached)
-                    && output.accumulator.iter().all(is_empty_response)
+                    && output.accumulator.iter().all(|message| {
+                        if self.allow_empty_after_tools {
+                            is_empty_response(message)
+                        } else {
+                            message.as_concat_text().trim().is_empty() && !message.is_tool_call()
+                        }
+                    })
             };
             if !empty_output || successful_tool_response || emit.cancel_token().is_cancelled() {
                 break empty_output;

@@ -6,7 +6,7 @@ use goose_agent::{
 use goose_provider_types::{
     base::{stream_from_single_message, MessageStream, Provider},
     conversation::{
-        message::Message,
+        message::{Message, MessageContent},
         token_usage::{ProviderUsage, Usage},
         Conversation,
     },
@@ -32,6 +32,7 @@ impl goose_agent::machine::MachineSession for Session {
 struct Model {
     calls: AtomicUsize,
     recover: bool,
+    thinking_only: bool,
 }
 #[async_trait]
 impl Provider for Model {
@@ -49,6 +50,11 @@ impl Provider for Model {
         Ok(stream_from_single_message(
             if self.recover && call > 0 {
                 Message::assistant().with_text("done")
+            } else if self.thinking_only {
+                Message::assistant().with_content(MessageContent::thinking(
+                    "I should read the file.",
+                    "signature",
+                ))
             } else {
                 Message::assistant()
             },
@@ -73,14 +79,18 @@ impl InferenceEffect for Effect {
 
 #[tokio::test]
 async fn hosts_can_retry_empty_inference_after_tools_without_replaying_the_tool() {
-    for (allow_empty, recover, expected_calls, marker) in [
-        (true, true, 1, false),
-        (false, true, 2, false),
-        (false, false, 4, true),
+    for (allow_empty, recover, thinking_only, expected_calls, marker) in [
+        (true, true, false, 1, false),
+        (true, true, true, 1, false),
+        (false, true, false, 2, false),
+        (false, true, true, 2, false),
+        (false, false, false, 4, true),
+        (false, false, true, 4, true),
     ] {
         let model = Arc::new(Model {
             calls: AtomicUsize::new(0),
             recover,
+            thinking_only,
         });
         let runner =
             InferenceRunner::<Session, Effect>::new(model.clone(), ModelConfig::new("fixture"))
