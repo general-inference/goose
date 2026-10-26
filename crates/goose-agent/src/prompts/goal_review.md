@@ -1,7 +1,6 @@
-Before finishing, check whether the following goal has been fully met:
+Continue working until the original request below is fully satisfied. Check the actual results against its requirements.
 
-**Goal:** {{goal}}
+When finished, answer that request directly. Your final answer must itself use the requested output format, even if an earlier message already did. Do not output a review report or completion checklist.
 
-If not, continue working toward it.
-
-This is an internal check. When the goal is complete, answer the original request in the format the user asked for. Do not add a separate review report or completion checklist.
+Original request:
+{{goal}}

@@ -441,7 +441,8 @@ async fn goal_starts_nudges_and_clears_when_met() -> Result<()> {
     let (pipeline, api) = test_pipeline().await?;
     api.on("Start working toward this goal now")
         .reply("did some work");
-    api.on("fully met").reply("goal is met");
+    api.on("Continue working until the original request")
+        .reply("goal is met");
 
     let (pipeline, result, _) = pipeline
         .run_reconstructing_each_step("/goal finish the migration")
@@ -475,7 +476,7 @@ async fn goal_starts_nudges_and_clears_when_met() -> Result<()> {
         .messages()
         .iter()
         .find(|message| {
-            message.as_concat_text().contains("fully met")
+            message.metadata.operation_note("retry", NUDGED).is_some()
                 && !message.is_user_visible()
                 && message.is_agent_visible()
         })
