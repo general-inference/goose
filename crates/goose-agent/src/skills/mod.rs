@@ -10,7 +10,7 @@ pub use discovery::{discover_skills, SkillRoot};
 
 use anyhow::Result;
 use arguments::apply_skill_arguments;
-use goose_sdk_types::custom_requests::SourceEntry;
+use goose_sdk_types::sources::SourceEntry;
 use std::path::Path;
 
 fn skill_argument_names(skill: &SourceEntry) -> Vec<String> {
