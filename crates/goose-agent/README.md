@@ -141,3 +141,19 @@ turn limits, approvals, cancellation and external verification in place.
 `operation::trailing_assistant_text` selects the user-visible final assistant
 block for an answer or stop-hook context. It excludes earlier tool narration and
 hidden content; Goose's stop hooks use this same implementation.
+
+## Repository instructions
+
+The native `project-context` feature exposes Goose's hint loader through
+`project_context`: configured instruction filenames, explicit global hint paths,
+Git-root ancestor loading, `.gitignore` filtering, bounded `@file` expansion and
+`SubdirectoryHintTracker`. Goose uses the same implementation.
+
+Hosts supply `HintFileSystem` for every read, metadata query and canonicalization.
+`NativeHintFileSystem` provides ordinary native access; it is not a sandbox.
+Restricted hosts must enforce access during actual operations, including symlink
+races. They may reject additional files or impose smaller read limits. Passing no
+global paths prevents global hints from being loaded. The tracker can be rebuilt
+from persisted tool arguments before inference, without separately persisting its
+in-memory state. It discovers hints after tool arguments are recorded; it does not
+intercept or authorize a tool's first write.

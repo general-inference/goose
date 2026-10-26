@@ -37,6 +37,7 @@ test-case.workspace = true
 [features]
 context-management = ["dep:goose-context-management"]
 permissions = ["dep:fs2", "dep:tempfile"]
+project-context = ["dep:ignore", "dep:shell-words", "dep:libc"]
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 js-sys = "0.3.105"
@@ -44,7 +45,15 @@ wasm-bindgen-futures = "0.4.78"
 wasm-bindgen-test = "0.3.78"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ignore = { workspace = true, optional = true }
+shell-words = { workspace = true, optional = true }
 fs2 = { workspace = true, optional = true }
 goose-context-management = { version = "0.1.0-alpha.13", path = "../goose-context-management", optional = true }
 serde_yaml.workspace = true
 tempfile = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tempfile.workspace = true
+
+[target."cfg(unix)".dependencies]
+libc = { version = "0.2.182", optional = true }

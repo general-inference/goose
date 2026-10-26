@@ -7,6 +7,7 @@ author:
 activities:
   - Initialize test workspace and logging infrastructure
   - Test file operations (create, read, update, delete, undo)
+  - Validate shared GDK repository hints and host filesystem access
   - Validate shell command execution and error handling
   - Validate Azure AI Foundry provider routing and deployment aliases
   - Validate the configurable Databricks AI Gateway path across all inference routes
@@ -29,7 +30,7 @@ parameters:
     input_type: string
     requirement: optional
     default: "all"
-    description: "Which test phases to run: all, basic, extensions, delegation, code-mode, declared-vision, reasoning, zai-coding-plan, acp-effort, compaction, advanced"
+    description: "Which test phases to run: all, basic, extensions, delegation, code-mode, project-context, declared-vision, reasoning, zai-coding-plan, acp-effort, compaction, advanced"
 
   - key: test_depth
     input_type: string
@@ -80,6 +81,18 @@ instructions: |
   - Shell command execution
   - Code analysis capabilities
   - Error handling and recovery
+
+  ### Repository Context (test_phases: project-context)
+  In an isolated workspace, create AGENTS.md importing a normal Markdown file and
+  an ignored file. Verify the normal import appears in project hints and the
+  ignored content does not. Create nested AGENTS.md and read a file in that
+  directory; verify its instructions appear on the next inference. Repeat after
+  restoring the conversation. Confirm imports of .git metadata and files outside
+  the repository boundary are excluded. Run the goose-agent project_context
+  integration test to verify an in-memory host filesystem supplies all hints,
+  imports and ignore patterns without native filesystem fallback. Report the
+  difference between hint discovery and tool authorization: hints do not authorize
+  tools or intercept their first write.
 
   ### Phase 2: Extension System Testing
   Test dynamic extension management:
