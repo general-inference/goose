@@ -1,5 +1,6 @@
-use std::fs;
+use crate::filesystem::{FileSystem, LocalFileSystem};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rmcp::model::{Annotations, CallToolResult, ContentBlock, TextContent};
 use schemars::JsonSchema;
@@ -31,7 +32,9 @@ pub struct FileEditParams {
     pub after: String,
 }
 
-pub struct EditTools;
+pub struct EditTools {
+    filesystem: Arc<dyn FileSystem>,
+}
 
 fn visible_text(text: impl Into<String>) -> ContentBlock {
     ContentBlock::Text(
@@ -41,7 +44,11 @@ fn visible_text(text: impl Into<String>) -> ContentBlock {
 
 impl EditTools {
     pub fn new() -> Self {
-        Self
+        Self::with_filesystem(Arc::new(LocalFileSystem))
+    }
+
+    pub fn with_filesystem(filesystem: Arc<dyn FileSystem>) -> Self {
+        Self { filesystem }
     }
 
     pub fn file_read_with_cwd(
@@ -51,7 +58,7 @@ impl EditTools {
     ) -> CallToolResult {
         let path = resolve_path(&params.path, working_dir);
 
-        match fs::read_to_string(&path) {
+        match self.filesystem.read_to_string(&path) {
             Ok(content) => {
                 let content = apply_line_limit(&content, params.line, params.limit);
                 CallToolResult::success(vec![visible_text(content)])
@@ -75,8 +82,8 @@ impl EditTools {
         let path = resolve_path(&params.path, working_dir);
 
         if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() && !parent.exists() {
-                if let Err(error) = fs::create_dir_all(parent) {
+            if !parent.as_os_str().is_empty() && !self.filesystem.exists(parent) {
+                if let Err(error) = self.filesystem.create_dir_all(parent) {
                     return CallToolResult::error(vec![visible_text(format!(
                         "Failed to create directory {}: {}",
                         parent.display(),
@@ -86,9 +93,9 @@ impl EditTools {
             }
         }
 
-        let is_new = !path.exists();
+        let is_new = !self.filesystem.exists(&path);
 
-        match fs::write(path, &params.content) {
+        match self.filesystem.write(&path, &params.content) {
             Ok(()) => {
                 let line_count = params.content.lines().count();
                 let action = if is_new { "Created" } else { "Wrote" };
@@ -115,7 +122,7 @@ impl EditTools {
     ) -> CallToolResult {
         let path = resolve_path(&params.path, working_dir);
 
-        let content = match fs::read_to_string(&path) {
+        let content = match self.filesystem.read_to_string(&path) {
             Ok(c) => c,
             Err(error) => {
                 return CallToolResult::error(vec![visible_text(format!(
@@ -131,7 +138,7 @@ impl EditTools {
                 return CallToolResult::error(vec![visible_text(msg)]);
             }
         };
-        match fs::write(&path, &new_content) {
+        match self.filesystem.write(&path, &new_content) {
             Ok(()) => {
                 let old_lines = params.before.lines().count();
                 let new_lines = params.after.lines().count();

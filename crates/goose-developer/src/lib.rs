@@ -2,8 +2,10 @@
 //! Filesystem and process access use the host account unless a backend is supplied.
 
 pub mod edit;
+pub mod filesystem;
 pub mod image;
 pub mod notifications;
+pub mod process;
 pub mod shell;
 mod shell_output_streaming;
 mod shell_process;
@@ -33,6 +35,7 @@ fn visible_text(text: impl Into<String>) -> ContentBlock {
 }
 
 pub struct Developer {
+    enabled: Vec<DeveloperTool>,
     info: InitializeResult,
     shell_tool: Arc<ShellTool>,
     edit_tools: Arc<EditTools>,
@@ -55,12 +58,44 @@ impl Developer {
             .with_instructions(developer_instructions());
 
         Ok(Self {
+            enabled: vec![
+                DeveloperTool::Write,
+                DeveloperTool::Edit,
+                DeveloperTool::Shell,
+                DeveloperTool::Tree,
+                DeveloperTool::ReadImage,
+            ],
             info,
             shell_tool: Arc::new(ShellTool::new()?),
             edit_tools: Arc::new(EditTools::new()),
             tree_tool: Arc::new(TreeTool::new()),
             image_tool: Arc::new(ImageTool::new()),
         })
+    }
+
+    /// Select the tools exposed by this instance; disabled tools cannot be called.
+    pub fn with_tools(mut self, tools: impl IntoIterator<Item = DeveloperTool>) -> Self {
+        self.enabled = tools.into_iter().collect();
+        self
+    }
+
+    /// Supplies filesystem operations for text reads, writes and edits only.
+    /// Tree and image access remain native; omit them from a confined provider.
+    pub fn with_edit_tools(mut self, tools: EditTools) -> Self {
+        self.edit_tools = Arc::new(tools);
+        self
+    }
+
+    pub fn with_shell_tool(mut self, tool: ShellTool) -> Self {
+        self.shell_tool = Arc::new(tool);
+        self
+    }
+
+    pub fn enabled_tools(&self) -> Vec<Tool> {
+        Self::get_tools()
+            .into_iter()
+            .filter(|tool| self.enabled.iter().any(|kind| kind.name() == tool.name))
+            .collect()
     }
 
     fn schema<T: JsonSchema>() -> JsonObject {
@@ -168,7 +203,7 @@ impl Developer {
         _cancellation_token: CancellationToken,
     ) -> Result<ListToolsResult, rmcp::model::ErrorData> {
         Ok(ListToolsResult {
-            tools: Self::get_tools(),
+            tools: self.enabled_tools(),
             next_cursor: None,
             meta: None,
             ..Default::default()
@@ -182,6 +217,12 @@ impl Developer {
         arguments: Option<JsonObject>,
         cancel_token: CancellationToken,
     ) -> Result<CallToolResult, rmcp::model::ErrorData> {
+        if !self.enabled.iter().any(|tool| tool.name() == name) {
+            return Err(rmcp::model::ErrorData::invalid_params(
+                format!("tool is not enabled: {name}"),
+                None,
+            ));
+        }
         let working_dir = ctx.working_dir.as_deref();
         match name {
             "shell" => match Self::parse_args::<ShellParams>(arguments) {
@@ -268,7 +309,7 @@ impl DeveloperSession for DeveloperContext {
 #[async_trait]
 impl<S: DeveloperSession> goose_agent::tool::ToolProvider<S> for Developer {
     async fn tools(&self, _session: &S) -> Result<Vec<Tool>> {
-        Ok(Self::get_tools())
+        Ok(self.enabled_tools())
     }
     async fn call(
         &self,
@@ -295,5 +336,25 @@ impl<S: DeveloperSession> goose_agent::tool::ToolProvider<S> for Developer {
             emit.cancel_token().clone(),
         )
         .await
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeveloperTool {
+    Write,
+    Edit,
+    Shell,
+    Tree,
+    ReadImage,
+}
+impl DeveloperTool {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Write => "write",
+            Self::Edit => "edit",
+            Self::Shell => "shell",
+            Self::Tree => "tree",
+            Self::ReadImage => "read_image",
+        }
     }
 }

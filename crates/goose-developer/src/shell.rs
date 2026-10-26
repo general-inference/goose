@@ -20,7 +20,8 @@ pub use super::shell_output_streaming::{
     ShellOutputStream, DEVELOPER_SHELL_OUTPUT_NOTIFICATION_METHOD,
 };
 use super::shell_output_streaming::{ShellOutputBatcher, SHELL_LIVE_OUTPUT_FLUSH_INTERVAL};
-use super::shell_process::ShellProcess;
+use crate::process::{NativeShellExecutor, ShellCommand, ShellExecutor};
+use std::sync::Arc;
 
 /// Check if the current process is running inside a Flatpak sandbox.
 ///
@@ -209,16 +210,28 @@ pub struct ShellOutput {
 }
 
 pub struct ShellTool {
+    executor: Arc<dyn ShellExecutor>,
     output_dir: tempfile::TempDir,
     call_index: AtomicUsize,
 }
 
 impl ShellTool {
     pub fn new() -> std::io::Result<Self> {
+        Self::with_executor(Arc::new(NativeShellExecutor))
+    }
+
+    pub fn with_executor(executor: Arc<dyn ShellExecutor>) -> std::io::Result<Self> {
         Ok(Self {
+            executor,
             output_dir: tempfile::tempdir()?,
             call_index: AtomicUsize::new(0),
         })
+    }
+
+    /// Keep saved output in a location that the host also permits tools to read.
+    pub fn with_output_directory(mut self, directory: tempfile::TempDir) -> Self {
+        self.output_dir = directory;
+        self
     }
 
     fn visible_text(text: impl Into<String>) -> ContentBlock {
@@ -266,6 +279,7 @@ impl ShellTool {
         }
 
         let execution = match run_command(
+            self.executor.as_ref(),
             &params.command,
             params.timeout_secs,
             working_dir,
@@ -409,6 +423,7 @@ fn resolve_shell_timeout(timeout_secs: Option<u64>) -> u64 {
 }
 
 async fn run_command(
+    executor: &dyn ShellExecutor,
     command_line: &str,
     timeout_secs: Option<u64>,
     working_dir: Option<&std::path::Path>,
@@ -427,29 +442,25 @@ async fn run_command(
         output_collection_error: None,
     };
 
-    let mut command = tokio::select! {
+    let command = ShellCommand {
+        command: command_line,
+        working_dir,
+        session_id,
+    };
+
+    let mut process = tokio::select! {
         biased;
         _ = cancellation_token.cancelled() => return Ok(not_started(false)),
         _ = sleep_until_deadline(deadline) => return Ok(not_started(true)),
-        command = build_shell_command(command_line, working_dir, session_id) => command,
-    };
-
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-    command.stdin(Stdio::null());
-
-    let mut process = ShellProcess::spawn(&mut command)
-        .map_err(|error| format!("Failed to spawn shell command: {}", error))?;
+        process = executor.spawn(command) => process,
+    }
+    .map_err(|error| format!("Failed to spawn shell command: {}", error))?;
 
     let child_stdout = process
-        .child
-        .stdout
-        .take()
+        .take_stdout()
         .ok_or_else(|| "Failed to capture stdout".to_string())?;
     let child_stderr = process
-        .child
-        .stderr
-        .take()
+        .take_stderr()
         .ok_or_else(|| "Failed to capture stderr".to_string())?;
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -539,7 +550,7 @@ async fn sleep_until_deadline(deadline: Option<tokio::time::Instant>) {
 ///
 /// On Unix the default shell (`bash`, falling back to `sh`) is likewise invoked
 /// as `<shell> -c <line>`.
-async fn build_shell_command(
+pub(crate) async fn build_shell_command(
     command_line: &str,
     working_dir: Option<&std::path::Path>,
     session_id: Option<&str>,
@@ -657,8 +668,8 @@ fn split_lines(lines: &[(bool, String)]) -> (String, String, String) {
 
 /// Collect lines from stdout and stderr and send `(is_stderr, line)` tuples to `tx`.
 async fn collect_tagged_lines(
-    stdout: tokio::process::ChildStdout,
-    stderr: tokio::process::ChildStderr,
+    stdout: impl tokio::io::AsyncRead + Send + Unpin,
+    stderr: impl tokio::io::AsyncRead + Send + Unpin,
     tx: tokio::sync::mpsc::UnboundedSender<(bool, String)>,
     notification_emitter: Option<ToolCallNotificationEmitter>,
 ) -> Result<(), std::io::Error> {

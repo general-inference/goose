@@ -16,3 +16,19 @@ No session storage or separate helper executable is required.
 
 From the repository root: `cargo test -p goose-developer` and
 `cargo clippy -p goose-developer --all-targets -- -D warnings`.
+
+For restricted hosts, supply `EditTools::with_filesystem` and
+`ShellTool::with_executor`, then attach them with `Developer::with_edit_tools`
+and `Developer::with_shell_tool`. The shared tool code retains exact-match edits,
+streaming, timeouts, and output handling; the host supplies filesystem operations
+and process creation. A `RunningShell` must stop active processes on drop.
+
+Select the permitted tools with `Developer::with_tools`. This filters both
+advertising and dispatch. The text filesystem backend does not govern `tree` or
+`read_image`; omit those tools when native filesystem or URL access is not allowed.
+These interfaces do not implement a sandbox themselves.
+
+`ShellExecutor` receives the command text and session context before any shell
+process or Flatpak environment probing occurs. Hosts can supply their own process
+handles and output streams. `ShellTool::with_output_directory` keeps saved output
+inside a host-approved temporary directory when needed.

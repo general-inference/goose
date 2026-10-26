@@ -40,6 +40,28 @@ impl ShellProcess {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::process::RunningShell for ShellProcess {
+    fn take_stdout(&mut self) -> Option<crate::process::ProcessOutput> {
+        self.child
+            .stdout
+            .take()
+            .map(|output| Box::new(output) as crate::process::ProcessOutput)
+    }
+    fn take_stderr(&mut self) -> Option<crate::process::ProcessOutput> {
+        self.child
+            .stderr
+            .take()
+            .map(|output| Box::new(output) as crate::process::ProcessOutput)
+    }
+    async fn wait(&mut self) -> io::Result<ExitStatus> {
+        ShellProcess::wait(self).await
+    }
+    async fn kill(&mut self) -> io::Result<()> {
+        ShellProcess::kill(self).await
+    }
+}
+
 impl Drop for ShellProcess {
     fn drop(&mut self) {
         if self.armed {
