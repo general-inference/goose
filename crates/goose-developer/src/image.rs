@@ -1,5 +1,12 @@
-use std::io::{Cursor, Read};
-use std::path::{Path, PathBuf};
+use crate::filesystem::{FileSystem, LocalFileSystem};
+use async_trait::async_trait;
+use std::io::Cursor;
+#[cfg(test)]
+use std::io::Read;
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
@@ -41,11 +48,35 @@ pub struct CropParams {
     pub height: u32,
 }
 
-pub struct ImageTool;
+/// Hosts can enforce network policy on the actual connection, including redirects and DNS.
+#[async_trait]
+pub trait ImageHttp: Send + Sync {
+    async fn get(&self, url: url::Url, max_bytes: u64) -> Result<Vec<u8>, String>;
+}
+
+pub struct NativeImageHttp;
+#[async_trait]
+impl ImageHttp for NativeImageHttp {
+    async fn get(&self, url: url::Url, max_bytes: u64) -> Result<Vec<u8>, String> {
+        load_url_bytes(url, max_bytes).await
+    }
+}
+
+pub struct ImageTool {
+    filesystem: Arc<dyn FileSystem>,
+    http: Arc<dyn ImageHttp>,
+}
 
 impl ImageTool {
     pub fn new() -> Self {
-        Self
+        Self {
+            filesystem: Arc::new(LocalFileSystem),
+            http: Arc::new(NativeImageHttp),
+        }
+    }
+
+    pub fn with_backends(filesystem: Arc<dyn FileSystem>, http: Arc<dyn ImageHttp>) -> Self {
+        Self { filesystem, http }
     }
 
     pub async fn image_read_with_cwd(
@@ -53,7 +84,14 @@ impl ImageTool {
         params: ImageReadParams,
         working_dir: Option<&Path>,
     ) -> CallToolResult {
-        match load_image(&params, working_dir).await {
+        match load_image_with_backends(
+            &params,
+            working_dir,
+            self.filesystem.as_ref(),
+            self.http.as_ref(),
+        )
+        .await
+        {
             Ok(loaded) => {
                 let mut result = CallToolResult::success(vec![
                     visible_text(loaded.summary(&params.source)),
@@ -112,22 +150,37 @@ impl LoadedImage {
     }
 }
 
+#[cfg(test)]
 async fn load_image(
     params: &ImageReadParams,
     working_dir: Option<&Path>,
+) -> Result<LoadedImage, String> {
+    load_image_with_backends(params, working_dir, &LocalFileSystem, &NativeImageHttp).await
+}
+
+async fn load_image_with_backends(
+    params: &ImageReadParams,
+    working_dir: Option<&Path>,
+    filesystem: &dyn FileSystem,
+    http: &dyn ImageHttp,
 ) -> Result<LoadedImage, String> {
     if params.source.trim().is_empty() {
         return Err("source cannot be empty".to_string());
     }
 
-    let bytes = load_image_bytes(&params.source, working_dir).await?;
+    let bytes = load_image_bytes(&params.source, working_dir, filesystem, http).await?;
     ensure_image_size(bytes.len() as u64)?;
 
     let format = image::guess_format(&bytes).map_err(|_| {
         "unsupported image format; supported formats are png, jpeg, gif, and webp".to_string()
     })?;
     let mime_type = mime_type(format)?;
-    let image = image::load_from_memory_with_format(&bytes, format)
+    let mut reader = image::io::Reader::with_format(Cursor::new(&bytes), format);
+    let mut limits = image::io::Limits::default();
+    limits.max_alloc = Some(128 * 1024 * 1024);
+    reader.limits(limits);
+    let image = reader
+        .decode()
         .map_err(|error| format!("failed to decode image: {error}"))?;
     let (original_width, original_height) = image.dimensions();
 
@@ -165,24 +218,29 @@ async fn load_image(
     })
 }
 
-async fn load_image_bytes(source: &str, working_dir: Option<&Path>) -> Result<Vec<u8>, String> {
+async fn load_image_bytes(
+    source: &str,
+    working_dir: Option<&Path>,
+    filesystem: &dyn FileSystem,
+    http: &dyn ImageHttp,
+) -> Result<Vec<u8>, String> {
     if let Ok(url) = url::Url::parse(source) {
         match url.scheme() {
-            "http" | "https" => load_url_bytes(url).await,
+            "http" | "https" => http.get(url, MAX_IMAGE_BYTES).await,
             "file" => {
                 let path = url
                     .to_file_path()
                     .map_err(|_| "invalid file URL".to_string())?;
-                load_file_bytes(path)
+                read_file_bytes(filesystem, &path)
             }
-            _ => load_file_bytes(resolve_path(source, working_dir)),
+            _ => read_file_bytes(filesystem, &resolve_path(source, working_dir)),
         }
     } else {
-        load_file_bytes(resolve_path(source, working_dir))
+        read_file_bytes(filesystem, &resolve_path(source, working_dir))
     }
 }
 
-async fn load_url_bytes(url: url::Url) -> Result<Vec<u8>, String> {
+async fn load_url_bytes(url: url::Url, max_bytes: u64) -> Result<Vec<u8>, String> {
     let client = reqwest::Client::builder()
         .user_agent(concat!(
             "goose/",
@@ -201,7 +259,7 @@ async fn load_url_bytes(url: url::Url) -> Result<Vec<u8>, String> {
         .error_for_status()
         .map_err(|error| format!("failed to download image: {error}"))?;
 
-    collect_response_bytes(response, MAX_IMAGE_BYTES).await
+    collect_response_bytes(response, max_bytes).await
 }
 
 async fn collect_response_bytes(
@@ -229,21 +287,20 @@ async fn collect_response_bytes(
     Ok(bytes)
 }
 
-fn load_file_bytes(path: PathBuf) -> Result<Vec<u8>, String> {
-    let file =
-        std::fs::File::open(path).map_err(|error| format!("failed to read image file: {error}"))?;
-    let file_size = file
-        .metadata()
-        .map_err(|error| format!("failed to read image file: {error}"))?
-        .len();
-    ensure_image_size(file_size)?;
-
-    let bytes = read_bounded(file, MAX_IMAGE_BYTES)
+fn read_file_bytes(filesystem: &dyn FileSystem, path: &Path) -> Result<Vec<u8>, String> {
+    let bytes = filesystem
+        .read(path, MAX_IMAGE_BYTES)
         .map_err(|error| format!("failed to read image file: {error}"))?;
     ensure_image_size(bytes.len() as u64)?;
     Ok(bytes)
 }
 
+#[cfg(test)]
+fn load_file_bytes(path: PathBuf) -> Result<Vec<u8>, String> {
+    read_file_bytes(&LocalFileSystem, &path)
+}
+
+#[cfg(test)]
 fn read_bounded(reader: impl Read, max_bytes: u64) -> std::io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     reader.take(max_bytes + 1).read_to_end(&mut bytes)?;

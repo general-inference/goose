@@ -107,3 +107,47 @@ async fn shell_tool_cannot_bypass_the_host_executor() {
     assert_eq!(result.is_error, Some(true));
     assert!(!dir.path().join("forbidden").exists());
 }
+
+struct DenyImages;
+#[async_trait]
+impl goose_developer::image::ImageHttp for DenyImages {
+    async fn get(&self, _: url::Url, _: u64) -> Result<Vec<u8>, String> {
+        Err("host blocked image network access".into())
+    }
+}
+
+#[tokio::test]
+async fn tree_and_images_never_fall_back_to_ambient_access() {
+    use goose_developer::{image::ImageTool, tree::TreeTool};
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("secret.txt"), "secret").unwrap();
+    let provider = Developer::new()
+        .unwrap()
+        .with_tree_tool(TreeTool::with_filesystem(Arc::new(ReadOnly)))
+        .with_image_tool(ImageTool::with_backends(
+            Arc::new(ReadOnly),
+            Arc::new(DenyImages),
+        ));
+    let context = DeveloperContext {
+        working_dir: Some(dir.path().into()),
+        ..Default::default()
+    };
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let emit = Emitter::new(tx, CancellationToken::new());
+    for call in [
+        CallToolRequestParams::new("tree").with_arguments(object!({"path":"."})),
+        CallToolRequestParams::new("read_image").with_arguments(object!({"source":"secret.txt"})),
+        CallToolRequestParams::new("read_image")
+            .with_arguments(object!({"source":"https://example.com/secret.png"})),
+    ] {
+        let result = provider
+            .call(&context, "restricted", call, &emit)
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert!(!result
+            .content
+            .iter()
+            .any(|part| matches!(part, rmcp::model::ContentBlock::Image(_))));
+    }
+}

@@ -24,9 +24,13 @@ streaming, timeouts, and output handling; the host supplies filesystem operation
 and process creation. A `RunningShell` must stop active processes on drop.
 
 Select the permitted tools with `Developer::with_tools`. This filters both
-advertising and dispatch. The text filesystem backend does not govern `tree` or
-`read_image`; omit those tools when native filesystem or URL access is not allowed.
-These interfaces do not implement a sandbox themselves.
+advertising and dispatch. For directory and image access, attach
+`TreeTool::with_filesystem` and `ImageTool::with_backends` using `with_tree_tool`
+and `with_image_tool`. All traversal, ignore-file reads, line counts, and image
+bytes go through the host filesystem. `ImageHttp` must enforce host network policy
+during connections and redirects. Image decoding and cropping remain shared Goose
+code. Unimplemented filesystem operations fail closed; they never fall back to
+native access. These interfaces do not implement a sandbox themselves.
 
 `ShellExecutor` receives the command text and session context before any shell
 process or Flatpak environment probing occurs. Hosts can supply their own process

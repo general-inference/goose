@@ -1,8 +1,11 @@
+use crate::filesystem::{FileKind, FileSystem, LocalFileSystem};
 use std::collections::BTreeMap;
+#[cfg(test)]
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
-use ignore::WalkBuilder;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use rmcp::model::{CallToolResult, ContentBlock};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -18,16 +21,21 @@ fn default_depth() -> u32 {
     2
 }
 
-pub struct TreeTool;
+pub struct TreeTool {
+    filesystem: Arc<dyn FileSystem>,
+}
 
 impl TreeTool {
     pub fn new() -> Self {
-        Self
+        Self::with_filesystem(Arc::new(LocalFileSystem))
+    }
+
+    pub fn with_filesystem(filesystem: Arc<dyn FileSystem>) -> Self {
+        Self { filesystem }
     }
 
     pub fn tree(&self, params: TreeParams) -> CallToolResult {
-        let root = PathBuf::from(&params.path);
-        self.tree_at(root, params.depth)
+        self.tree_with_cwd(params, None)
     }
 
     pub fn tree_with_cwd(&self, params: TreeParams, working_dir: Option<&Path>) -> CallToolResult {
@@ -45,27 +53,16 @@ impl TreeTool {
     }
 
     fn tree_at(&self, root: PathBuf, depth: u32) -> CallToolResult {
-        if !root.exists() {
-            return CallToolResult::error(vec![ContentBlock::text(format!(
-                "Path does not exist: {}",
-                root.display()
-            ))]);
-        }
-
-        if !root.is_dir() {
-            return CallToolResult::error(vec![ContentBlock::text(format!(
-                "Path is not a directory: {}",
-                root.display()
-            ))]);
-        }
-
-        let max_depth = if depth == 0 {
-            None
-        } else {
-            Some(depth as usize)
+        let max_depth = (depth != 0).then_some(depth as usize);
+        let mut tree = match collect_tree(self.filesystem.as_ref(), &root, max_depth) {
+            Ok(tree) => tree,
+            Err(error) => {
+                return CallToolResult::error(vec![ContentBlock::text(format!(
+                    "Could not list {}: {error}",
+                    root.display()
+                ))])
+            }
         };
-
-        let mut tree = collect_tree(&root, max_depth);
         tree.compute_total_lines();
 
         let mut output = String::new();
@@ -148,44 +145,73 @@ impl DirectoryNode {
     }
 }
 
-fn collect_tree(root: &Path, max_depth: Option<usize>) -> DirectoryNode {
-    let mut builder = WalkBuilder::new(root);
-    builder.git_ignore(true);
-    builder.git_exclude(true);
-    builder.git_global(true);
-    builder.require_git(false);
-    builder.ignore(true);
-    builder.hidden(true);
-
-    if let Some(depth) = max_depth {
-        builder.max_depth(Some(depth + 1));
+fn add_ignores(files: &dyn FileSystem, directory: &Path, rules: &mut Vec<Gitignore>) {
+    for name in [".git/info/exclude", ".gitignore", ".ignore"] {
+        let path = directory.join(name);
+        if let Ok(text) = files.read_to_string(&path) {
+            let mut builder = GitignoreBuilder::new(directory);
+            for line in text.lines() {
+                let _ = builder.add_line(Some(path.clone()), line);
+            }
+            if let Ok(rule) = builder.build() {
+                rules.push(rule);
+            }
+        }
     }
+}
 
+fn collect_tree(
+    files: &dyn FileSystem,
+    root: &Path,
+    max_depth: Option<usize>,
+) -> std::io::Result<DirectoryNode> {
+    // All traversal, ignore-file and content reads use the same host capability.
+    let entries = files.read_dir(root)?;
+    let mut rules = files.global_ignore().into_iter().collect::<Vec<_>>();
+    for ancestor in root.ancestors().collect::<Vec<_>>().into_iter().rev() {
+        add_ignores(files, ancestor, &mut rules);
+    }
+    let mut pending = vec![(root.to_path_buf(), 0, rules, entries)];
     let mut tree = DirectoryNode::default();
-    for entry in builder.build().flatten() {
-        let path = entry.path();
-        if path == root {
-            continue;
+    while let Some((directory, depth, mut rules, entries)) = pending.pop() {
+        if directory != root {
+            add_ignores(files, &directory, &mut rules);
         }
-
-        let rel = match path.strip_prefix(root) {
-            Ok(rel) => rel,
-            Err(_) => continue,
-        };
-
-        let components = match relative_components(rel) {
-            Some(components) => components,
-            None => continue,
-        };
-
-        if entry.file_type().is_some_and(|t| t.is_dir()) {
-            tree.insert_dir(&components);
-        } else if entry.file_type().is_some_and(|t| t.is_file()) {
-            tree.insert_file(&components, count_file_lines(path));
+        for entry in entries {
+            let path = directory.join(&entry.name);
+            let is_dir = entry.kind == FileKind::Directory;
+            let matched = rules
+                .iter()
+                .rev()
+                .map(|rule| rule.matched(&path, is_dir))
+                .find(|matched| !matched.is_none());
+            if matched.as_ref().is_some_and(|matched| matched.is_ignore())
+                || (entry.name.to_string_lossy().starts_with('.')
+                    && !matched
+                        .as_ref()
+                        .is_some_and(|matched| matched.is_whitelist()))
+            {
+                continue;
+            }
+            let Some(components) = path.strip_prefix(root).ok().and_then(relative_components)
+            else {
+                continue;
+            };
+            match entry.kind {
+                FileKind::Directory => {
+                    tree.insert_dir(&components);
+                    if max_depth.is_none_or(|limit| depth < limit) {
+                        if let Ok(children) = files.read_dir(&path) {
+                            pending.push((path, depth + 1, rules.clone(), children));
+                        }
+                    }
+                }
+                FileKind::File => tree.insert_file(&components, count_file_lines(files, &path)),
+                FileKind::Symlink | FileKind::Other => {}
+            }
         }
     }
-
-    tree
+    Ok(tree)
 }
 
 fn relative_components(path: &Path) -> Option<Vec<String>> {
@@ -204,8 +230,8 @@ fn relative_components(path: &Path) -> Option<Vec<String>> {
     }
 }
 
-fn count_file_lines(path: &Path) -> usize {
-    match fs::read_to_string(path) {
+fn count_file_lines(files: &dyn FileSystem, path: &Path) -> usize {
+    match files.read_to_string(path) {
         Ok(content) => content.lines().count(),
         Err(_) => 0,
     }

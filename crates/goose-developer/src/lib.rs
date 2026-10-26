@@ -79,10 +79,19 @@ impl Developer {
         self
     }
 
-    /// Supplies filesystem operations for text reads, writes and edits only.
-    /// Tree and image access remain native; omit them from a confined provider.
+    /// Supplies filesystem operations for text reads, writes and edits.
     pub fn with_edit_tools(mut self, tools: EditTools) -> Self {
         self.edit_tools = Arc::new(tools);
+        self
+    }
+
+    pub fn with_tree_tool(mut self, tool: TreeTool) -> Self {
+        self.tree_tool = Arc::new(tool);
+        self
+    }
+
+    pub fn with_image_tool(mut self, tool: ImageTool) -> Self {
+        self.image_tool = Arc::new(tool);
         self
     }
 
