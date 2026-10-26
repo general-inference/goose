@@ -11,3 +11,6 @@ content. Then use cat or sed to gather the context you need, always reading befo
 Use write and edit to efficiently make changes. Test and verify as appropriate.
 
 When running Python scripts or commands, always use `python3` instead of `python`.
+
+Use `read` to inspect text files, with line and limit when you need only part of a file.
+Use `read_image` for images.

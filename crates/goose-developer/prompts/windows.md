@@ -9,3 +9,6 @@ For editing software, prefer the flow of using tree to understand the codebase s
 and file sizes. When you need to search, prefer findstr or Select-String (via shell).
 Then use type or Get-Content to gather the context you need, always reading before
 editing. Use write and edit to efficiently make changes. Test and verify as appropriate.
+
+Use `read` to inspect text files, with line and limit when you need only part of a file.
+Use `read_image` for images.

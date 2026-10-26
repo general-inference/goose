@@ -151,3 +151,53 @@ async fn tree_and_images_never_fall_back_to_ambient_access() {
             .any(|part| matches!(part, rmcp::model::ContentBlock::Image(_))));
     }
 }
+
+struct VirtualText;
+impl FileSystem for VirtualText {
+    fn read_to_string(&self, path: &Path) -> io::Result<String> {
+        if path.ends_with("virtual.txt") {
+            Ok("first\nsecond\nthird\n".into())
+        } else {
+            Err(io::ErrorKind::PermissionDenied.into())
+        }
+    }
+    fn write(&self, _: &Path, _: &str) -> io::Result<()> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+    fn create_dir_all(&self, _: &Path) -> io::Result<()> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+    fn exists(&self, _: &Path) -> bool {
+        false
+    }
+}
+
+#[tokio::test]
+async fn read_uses_host_content_line_limits_and_denials() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("secret.txt"), "ambient secret").unwrap();
+    let provider = Developer::new()
+        .unwrap()
+        .with_edit_tools(EditTools::with_filesystem(Arc::new(VirtualText)));
+    let context = DeveloperContext {
+        working_dir: Some(dir.path().into()),
+        ..Default::default()
+    };
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let emit = Emitter::new(tx, CancellationToken::new());
+    for (path, denied) in [("virtual.txt", false), ("secret.txt", true)] {
+        let call = CallToolRequestParams::new("read")
+            .with_arguments(object!({"path":path,"line":2,"limit":1}));
+        let result = provider.call(&context, "read", call, &emit).await.unwrap();
+        assert_eq!(result.is_error.unwrap_or(false), denied);
+        let text = result
+            .content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .collect::<String>();
+        if !denied {
+            assert_eq!(text, "second\n");
+        }
+        assert!(!text.contains("ambient secret"));
+    }
+}

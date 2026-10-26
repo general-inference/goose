@@ -13,7 +13,7 @@ pub mod tree;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use edit::{EditTools, FileEditParams, FileWriteParams};
+use edit::{EditTools, FileEditParams, FileReadParams, FileWriteParams};
 use image::{ImageReadParams, ImageTool};
 use rmcp::model::{
     Annotations, CallToolResult, ContentBlock, Implementation, InitializeResult, JsonObject,
@@ -59,6 +59,7 @@ impl Developer {
 
         Ok(Self {
             enabled: vec![
+                DeveloperTool::Read,
                 DeveloperTool::Write,
                 DeveloperTool::Edit,
                 DeveloperTool::Shell,
@@ -126,6 +127,14 @@ impl Developer {
 
     pub fn get_tools() -> Vec<Tool> {
         vec![
+            Tool::new(
+                "read".to_string(),
+                "Read a text file, optionally starting at a line and limiting the number of lines. Use read_image for images.".to_string(),
+                Self::schema::<FileReadParams>(),
+            )
+            .annotate(ToolAnnotations::from_raw(
+                Some("Read".to_string()), Some(true), Some(false), Some(true), Some(false),
+            )),
             Tool::new(
                 "write".to_string(),
                 "Create a new file or overwrite an existing file. Creates parent directories if needed.".to_string(),
@@ -234,6 +243,12 @@ impl Developer {
         }
         let working_dir = ctx.working_dir.as_deref();
         match name {
+            "read" => match Self::parse_args::<FileReadParams>(arguments) {
+                Ok(params) => Ok(self.edit_tools.file_read_with_cwd(params, working_dir)),
+                Err(error) => Ok(CallToolResult::error(vec![visible_text(format!(
+                    "Error: {error}"
+                ))])),
+            },
             "shell" => match Self::parse_args::<ShellParams>(arguments) {
                 Ok(mut params) => {
                     params.timeout_secs.get_or_insert(ctx.default_timeout);
@@ -350,6 +365,7 @@ impl<S: DeveloperSession> goose_agent::tool::ToolProvider<S> for Developer {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DeveloperTool {
+    Read,
     Write,
     Edit,
     Shell,
@@ -359,6 +375,7 @@ pub enum DeveloperTool {
 impl DeveloperTool {
     pub fn name(self) -> &'static str {
         match self {
+            Self::Read => "read",
             Self::Write => "write",
             Self::Edit => "edit",
             Self::Shell => "shell",
