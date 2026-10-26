@@ -23,6 +23,23 @@ pub trait CompactionModel: Send + Sync {
 pub trait TokenEstimator: Send + Sync {
     async fn count_chat_tokens(&self, system: &str, messages: &[Message]) -> usize;
     async fn count_text_tokens(&self, text: &str) -> usize;
+
+    /// Includes the tool definitions sent with a prepared inference request.
+    /// Implementations with model-specific schema accounting can override this estimate.
+    async fn count_request_tokens(
+        &self,
+        system: &str,
+        messages: &[Message],
+        tools: &[rmcp::model::Tool],
+    ) -> usize {
+        let mut tokens = self.count_chat_tokens(system, messages).await;
+        for tool in tools {
+            tokens += self
+                .count_text_tokens(&serde_json::to_string(tool).expect("tool is serializable"))
+                .await;
+        }
+        tokens
+    }
 }
 
 pub struct ProviderModel {

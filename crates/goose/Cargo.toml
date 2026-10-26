@@ -138,7 +138,6 @@ async-trait = { workspace = true }
 async-stream = { workspace = true }
 minijinja = { version = "2.18", default-features = false, features = ["loader", "multi_template", "serde", "builtins"] }
 include_dir = { workspace = true }
-tiktoken-rs = { version = "0.12", default-features = false }
 chrono = { workspace = true }
 clap = { workspace = true }
 indoc = { workspace = true }
@@ -163,7 +162,7 @@ strum = { workspace = true }
 once_cell = { workspace = true }
 etcetera = { workspace = true }
 fs-err = { version = "3.1", default-features = false }
-goose-context-management = { path = "../goose-context-management" }
+goose-context-management = { path = "../goose-context-management", features = ["token-counter"] }
 goose-providers = { path = "../goose-providers", default-features = false }
 goose-download-manager = { path = "../goose-download-manager" }
 goose-sdk-types = { path = "../goose-sdk-types" }

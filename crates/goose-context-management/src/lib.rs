@@ -17,6 +17,8 @@ pub mod provider;
 pub mod structured;
 pub mod summarize;
 pub mod templates;
+#[cfg(feature = "token-counter")]
+pub mod token_counter;
 
 use anyhow::Result;
 use goose_provider_types::conversation::message::Message;
