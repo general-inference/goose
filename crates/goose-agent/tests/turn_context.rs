@@ -40,7 +40,7 @@ fn preserves_goose_context_and_turn_budget_thresholds() {
 }
 
 #[test]
-fn stable_context_refreshes_after_goal_review() {
+fn stable_context_is_not_repeated_for_goal_review() {
     use goose_agent::{goal::review_message, turn_context::update};
     use goose_provider_types::conversation::message::Message;
     let event = || turn_context_event(Path::new("/workspace"), None, vec![], "time");
@@ -50,7 +50,7 @@ fn stable_context_refreshes_after_goal_review() {
     messages.push(Message::assistant().with_text("Implemented and tested."));
     assert!(update(event(), &messages).is_none());
     messages.push(review_message("Implement the feature", &messages).unwrap());
-    assert!(update(event(), &messages).is_some());
+    assert!(update(event(), &messages).is_none());
     messages.push(event().unwrap());
     assert!(update(event(), &messages).is_none());
 }

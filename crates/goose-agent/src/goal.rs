@@ -17,7 +17,9 @@ const SCOPE: &str = "retry";
 /// This prompts self-review; it does not prove the goal was met.
 pub fn review_message(goal: &str, messages: &[Message]) -> Option<Message> {
     if !ends_turn(messages)
-        || messages.iter().any(is_review_message)
+        || messages
+            .iter()
+            .any(|message| message.metadata.operation_note(SCOPE, NUDGED).is_some())
         || messages.last().is_some_and(|message| {
             message.metadata.output_token_limit_reached || is_empty_response_marker(message)
         })
@@ -35,10 +37,6 @@ pub fn review_message(goal: &str, messages: &[Message]) -> Option<Message> {
         .metadata
         .set_operation_note(SCOPE, NUDGED, serde_json::json!(true));
     Some(message)
-}
-
-pub(crate) fn is_review_message(message: &Message) -> bool {
-    message.metadata.operation_note(SCOPE, NUDGED).is_some()
 }
 
 /// Register before inference to give a completed answer one opportunity for

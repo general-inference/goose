@@ -29,13 +29,11 @@ pub fn turn_context_event(
     )
 }
 
-/// Suppress unchanged context within a turn, but refresh it after goal review so
-/// the review sees current host context alongside the goal it is checking.
+/// Suppress unchanged context within a turn, preserving Goose's event timing.
 pub fn update(event: Option<Message>, messages: &[Message]) -> Option<Message> {
     let last = messages
         .iter()
         .rev()
-        .take_while(|message| !crate::goal::is_review_message(message))
         .find(|message| message.is_turn_context())
         .map(Message::as_concat_text);
     event.filter(|message| Some(message.as_concat_text()) != last)

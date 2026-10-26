@@ -148,7 +148,7 @@ hidden content; Goose's stop hooks use this same implementation.
 used by Goose. Hosts supply the workspace, model context limit, stable formatted
 timestamp and contextual parts; `turn_context_event` returns an agent-only message
 marked for persistence. `system_prompt_block` explains its meaning to the model.
-`update` suppresses unchanged blocks and refreshes context after goal review.
+`update` suppresses unchanged blocks, preserving Goose's event timing even during goal review.
 Configuration, clock reads and extension leasing stay with the host. The shared implementation preserves Goose's small-context threshold
 and escapes workspace/time fields while retaining contributed text literally.
 
