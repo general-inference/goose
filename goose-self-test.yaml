@@ -184,7 +184,22 @@ prompt: |
   Track your progress using the todo extension. Start with:
   - [ ] Initialize test workspace
   - [ ] Set up logging infrastructure
-  - [ ] Begin Phase 1 testing
+  - [ ] Begin the selected test phases
+
+  {% if test_phases == "all" or "prompt-composition" in test_phases %}
+  ## Prompt Composition
+
+  Report your active identity and available tools. Create a small text file in
+  {{ workspace_dir }} using the developer write tool, then read it back with the
+  developer read tool. Follow the workspace instructions for its name and content.
+  The host checks the actual provider requests for the system prompt and tagged
+  turn context; do not substitute your self-report or explicit file reads for that
+  evidence. Do not inspect parent directories, host runners or launch another Goose.
+
+  When prompt-composition is the only selected phase, proceed directly to Final
+  Report Generation after this write/read check. Do not run project-context,
+  extension, load, delegation, compaction or other phases to fill the report.
+  {% endif %}
 
   {% if test_phases == "all" or "project-context" in test_phases %}
   ## Repository Instructions Through GDK
@@ -590,6 +605,8 @@ prompt: |
 
   ### 1. Detailed Report at {{ workspace_dir }}/detailed_report.md
   Include all test details, logs, and technical information.
+  Mark unselected or unexecuted checks as not run. Do not run extra phases just
+  to populate report fields.
 
   ### 2. Executive Summary (REQUIRED - Display in Terminal)
 
