@@ -6,11 +6,11 @@ mod arguments;
 mod discovery;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use discovery::{discover_skills, SkillRoot};
+pub use discovery::{discover_skills, discover_skills_with_filesystem, SkillFileSystem, SkillRoot};
 
 use anyhow::Result;
 use arguments::apply_skill_arguments;
-use goose_sdk_types::sources::SourceEntry;
+pub use goose_sdk_types::sources::{SourceEntry, SourceType};
 use std::path::Path;
 
 fn skill_argument_names(skill: &SourceEntry) -> Vec<String> {

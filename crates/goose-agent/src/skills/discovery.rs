@@ -7,6 +7,38 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
+/// Filesystem access for hosts that confine skill discovery.
+/// Enforcement must happen in each operation, including symlink resolution.
+pub trait SkillFileSystem: Send + Sync {
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf>;
+    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>>;
+    fn is_dir(&self, path: &Path) -> bool;
+    fn is_file(&self, path: &Path) -> bool;
+    fn read_to_string(&self, path: &Path) -> std::io::Result<String>;
+}
+
+struct NativeSkillFileSystem;
+impl SkillFileSystem for NativeSkillFileSystem {
+    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
+        path.canonicalize()
+    }
+    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>> {
+        Ok(std::fs::read_dir(path)?
+            .flatten()
+            .map(|entry| entry.path())
+            .collect())
+    }
+    fn is_dir(&self, path: &Path) -> bool {
+        path.is_dir()
+    }
+    fn is_file(&self, path: &Path) -> bool {
+        path.is_file()
+    }
+    fn read_to_string(&self, path: &Path) -> std::io::Result<String> {
+        std::fs::read_to_string(path)
+    }
+}
+
 /// A host-selected search root; earlier roots take precedence.
 #[derive(Debug, Clone)]
 pub struct SkillRoot {
@@ -103,6 +135,7 @@ fn should_skip_dir(path: &Path) -> bool {
 }
 
 fn walk_files_recursively<F, G>(
+    filesystem: &dyn SkillFileSystem,
     dir: &Path,
     visited_dirs: &mut HashSet<PathBuf>,
     should_descend: &mut G,
@@ -111,7 +144,7 @@ fn walk_files_recursively<F, G>(
     F: FnMut(&Path),
     G: FnMut(&Path) -> bool,
 {
-    let canonical_dir = match std::fs::canonicalize(dir) {
+    let canonical_dir = match filesystem.canonicalize(dir) {
         Ok(path) => path,
         Err(_) => return,
     };
@@ -120,24 +153,24 @@ fn walk_files_recursively<F, G>(
         return;
     }
 
-    let entries = match std::fs::read_dir(dir) {
+    let entries = match filesystem.read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
     };
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
+    for path in entries {
+        if filesystem.is_dir(&path) {
             if should_descend(&path) {
-                walk_files_recursively(&path, visited_dirs, should_descend, visit_file);
+                walk_files_recursively(filesystem, &path, visited_dirs, should_descend, visit_file);
             }
-        } else if path.is_file() {
+        } else if filesystem.is_file(&path) {
             visit_file(&path);
         }
     }
 }
 
 fn scan_skills_from_dir(
+    filesystem: &dyn SkillFileSystem,
     dir: &Path,
     global: bool,
     writable: bool,
@@ -148,6 +181,7 @@ fn scan_skills_from_dir(
     let mut visited_dirs = HashSet::new();
 
     walk_files_recursively(
+        filesystem,
         dir,
         &mut visited_dirs,
         &mut |path| !should_skip_dir(path),
@@ -166,12 +200,12 @@ fn scan_skills_from_dir(
         let registered_skill_dir = if preserve_path {
             skill_dir.to_path_buf()
         } else {
-            let Ok(canonical_dir) = skill_dir.canonicalize() else {
+            let Ok(canonical_dir) = filesystem.canonicalize(skill_dir) else {
                 continue;
             };
             canonical_dir
         };
-        let content = match std::fs::read_to_string(&skill_file) {
+        let content = match filesystem.read_to_string(&skill_file) {
             Ok(c) => c,
             Err(e) => {
                 warn!("Failed to read skill file {}: {}", skill_file.display(), e);
@@ -186,9 +220,12 @@ fn scan_skills_from_dir(
                 let mut files = Vec::new();
                 let mut visited_support_dirs = HashSet::new();
                 walk_files_recursively(
+                    filesystem,
                     skill_dir,
                     &mut visited_support_dirs,
-                    &mut |path| !should_skip_dir(path) && !path.join("SKILL.md").is_file(),
+                    &mut |path| {
+                        !should_skip_dir(path) && !filesystem.is_file(&path.join("SKILL.md"))
+                    },
                     &mut |path| {
                         if path.file_name().and_then(|n| n.to_str()) != Some("SKILL.md") {
                             if let Ok(relative) = path.strip_prefix(skill_dir) {
@@ -228,11 +265,20 @@ fn scan_skills_from_dir(
 /// affects returned path spelling; discovery is not a confined file-open API.
 /// The caller must enforce access policy when opening returned paths.
 pub fn discover_skills(roots: impl IntoIterator<Item = SkillRoot>) -> Vec<SourceEntry> {
+    discover_skills_with_filesystem(roots, &NativeSkillFileSystem)
+}
+
+/// Uses the same discovery and parsing with host-enforced filesystem access.
+pub fn discover_skills_with_filesystem(
+    roots: impl IntoIterator<Item = SkillRoot>,
+    filesystem: &dyn SkillFileSystem,
+) -> Vec<SourceEntry> {
     let mut sources: Vec<SourceEntry> = Vec::new();
     let mut seen = HashSet::new();
 
     for dir in roots {
         for source in scan_skills_from_dir(
+            filesystem,
             &dir.path,
             dir.global,
             dir.writable,
