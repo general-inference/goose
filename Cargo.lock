@@ -4445,6 +4445,7 @@ version = "0.1.0-alpha.13"
 dependencies = [
  "anyhow",
  "async-trait",
+ "fs2",
  "futures",
  "goose-context-management",
  "goose-provider-types",
@@ -4456,6 +4457,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "tempfile",
+ "test-case",
  "tokio",
  "tokio-util",
  "tracing",

@@ -156,42 +156,26 @@ impl ToolInspector for PermissionInspector {
             if let Ok(tool_call) = &request.tool_call {
                 let tool_name = &tool_call.name;
 
-                let action = match goose_mode {
-                    GooseMode::Chat => continue,
-                    GooseMode::Auto => InspectionAction::Allow,
-                    GooseMode::Approve | GooseMode::SmartApprove => {
-                        // 1. Check user-defined permission first
-                        if let Some(level) = permission_manager.get_user_permission(tool_name) {
-                            match level {
-                                PermissionLevel::AlwaysAllow => InspectionAction::Allow,
-                                PermissionLevel::NeverAllow => InspectionAction::Deny,
-                                PermissionLevel::AskBefore => {
-                                    InspectionAction::RequireApproval(None)
-                                }
-                            }
-                        // 2. Check for a read-only annotation in SmartApprove mode
-                        } else if goose_mode == GooseMode::SmartApprove
-                            && self.is_readonly_annotated_tool(tool_name)
-                        {
-                            InspectionAction::Allow
-                        // 3. Special case for extension management
-                        } else if tool_name == MANAGE_EXTENSIONS_TOOL_NAME_COMPLETE {
-                            InspectionAction::RequireApproval(Some(
-                                "Extension management requires approval for security".to_string(),
-                            ))
-                        // 4. Defer to LLM detection (SmartApprove, uncached or legacy cached allow)
-                        } else if goose_mode == GooseMode::SmartApprove
-                            && matches!(
-                                permission_manager.get_smart_approve_permission(tool_name),
-                                None | Some(PermissionLevel::AlwaysAllow)
-                            )
-                        {
-                            llm_detect_candidates.push(request);
-                            continue;
-                        // 5. Default: require approval for unknown tools
-                        } else {
-                            InspectionAction::RequireApproval(None)
-                        }
+                let action = match goose_agent::permission::decide(
+                    goose_mode,
+                    permission_manager.get_user_permission(tool_name).as_ref(),
+                    self.is_readonly_annotated_tool(tool_name),
+                    tool_name == MANAGE_EXTENSIONS_TOOL_NAME_COMPLETE,
+                    permission_manager
+                        .get_smart_approve_permission(tool_name)
+                        .as_ref(),
+                ) {
+                    goose_agent::permission::Decision::Skip => continue,
+                    goose_agent::permission::Decision::Allow => InspectionAction::Allow,
+                    goose_agent::permission::Decision::Deny => InspectionAction::Deny,
+                    goose_agent::permission::Decision::Ask => InspectionAction::RequireApproval(
+                        (tool_name == MANAGE_EXTENSIONS_TOOL_NAME_COMPLETE).then(|| {
+                            "Extension management requires approval for security".to_string()
+                        }),
+                    ),
+                    goose_agent::permission::Decision::Judge => {
+                        llm_detect_candidates.push(request);
+                        continue;
                     }
                 };
 

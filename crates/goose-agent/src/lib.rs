@@ -7,3 +7,5 @@ pub mod operation;
 pub mod skills;
 pub mod subagent;
 pub mod tool;
+
+pub mod permission;

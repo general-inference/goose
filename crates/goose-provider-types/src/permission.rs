@@ -21,3 +21,12 @@ pub struct PermissionConfirmation {
     pub principal_type: PrincipalType,
     pub permission: Permission,
 }
+
+/// Enum representing the possible permission levels for a tool.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionLevel {
+    AlwaysAllow, // Tool can always be used without prompt
+    AskBefore,   // Tool requires permission to be granted before use
+    NeverAllow,  // Tool is never allowed to be used
+}
