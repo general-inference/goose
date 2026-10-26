@@ -211,7 +211,7 @@ pub struct ShellOutput {
 
 pub struct ShellTool {
     executor: Arc<dyn ShellExecutor>,
-    output_dir: tempfile::TempDir,
+    output_dir: Arc<tempfile::TempDir>,
     call_index: AtomicUsize,
 }
 
@@ -223,14 +223,14 @@ impl ShellTool {
     pub fn with_executor(executor: Arc<dyn ShellExecutor>) -> std::io::Result<Self> {
         Ok(Self {
             executor,
-            output_dir: tempfile::tempdir()?,
+            output_dir: Arc::new(tempfile::tempdir()?),
             call_index: AtomicUsize::new(0),
         })
     }
 
     /// Keep saved output in a location that the host also permits tools to read.
-    pub fn with_output_directory(mut self, directory: tempfile::TempDir) -> Self {
-        self.output_dir = directory;
+    pub fn with_output_directory(mut self, directory: impl Into<Arc<tempfile::TempDir>>) -> Self {
+        self.output_dir = directory.into();
         self
     }
 
