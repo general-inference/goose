@@ -4339,6 +4339,7 @@ dependencies = [
  "goose-acp-macros",
  "goose-agent",
  "goose-context-management",
+ "goose-developer",
  "goose-download-manager",
  "goose-mcp",
  "goose-providers",
@@ -4545,6 +4546,36 @@ dependencies = [
  "tiktoken-rs",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "goose-developer"
+version = "0.1.0-alpha.13"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.23.1",
+ "env-lock",
+ "goose-agent",
+ "ignore",
+ "image 0.24.9",
+ "libc",
+ "ntapi",
+ "reqwest",
+ "rmcp",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "shellexpand",
+ "tempfile",
+ "test-case",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "url",
+ "which 8.0.6",
+ "winapi",
 ]
 
 [[package]]

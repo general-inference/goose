@@ -50,3 +50,8 @@ version_group = "gdk"
 name = "goose-sdk"
 release = true
 version_group = "gdk"
+
+[[package]]
+name = "goose-developer"
+release = true
+version_group = "gdk"

@@ -1,0 +1,50 @@
+[package]
+name = "goose-developer"
+version = "0.1.0-alpha.13"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Goose developer tools for native GDK applications"
+
+[lints]
+workspace = true
+
+[features]
+default = ["rustls-tls"]
+rustls-tls = ["reqwest/rustls"]
+native-tls = ["reqwest/native-tls"]
+
+[dependencies]
+goose-agent = { path = "../goose-agent", version = "0.1.0-alpha.13" }
+anyhow.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+ignore.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+shellexpand.workspace = true
+reqwest = { workspace = true, features = ["stream", "system-proxy"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["process", "io-util", "macros", "rt", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tokio-stream = { workspace = true, features = ["io-util"] }
+url.workspace = true
+image = { version = "0.24.9", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+tracing.workspace = true
+which.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2.182", default-features = false, features = ["std"] }
+
+[target.'cfg(windows)'.dependencies]
+winapi = { workspace = true, features = ["handleapi", "jobapi2", "processthreadsapi", "winbase", "winnt"] }
+ntapi = { version = "0.4.3", default-features = false, features = ["user"] }
+
+[dev-dependencies]
+env-lock.workspace = true
+test-case.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "net"] }

@@ -3,7 +3,6 @@ use rmcp::model::CallToolResult;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 use std::path::PathBuf;
 
@@ -12,21 +11,7 @@ use crate::conversation::message::Message;
 use crate::mcp_utils::ToolResult;
 use rmcp::model::ServerNotification;
 
-#[derive(Clone)]
-pub(crate) struct ToolCallNotificationEmitter {
-    sender: mpsc::Sender<ServerNotification>,
-}
-
-impl ToolCallNotificationEmitter {
-    pub(crate) fn new(sender: mpsc::Sender<ServerNotification>) -> Self {
-        Self { sender }
-    }
-
-    pub(crate) fn emit_best_effort(&self, notification: ServerNotification) {
-        // Do not let a slow notification consumer delay tool execution.
-        let _ = self.sender.try_send(notification);
-    }
-}
+pub(crate) use goose_developer::notifications::ToolCallNotificationEmitter;
 
 /// Context passed through the tool call dispatch chain.
 #[derive(Clone)]

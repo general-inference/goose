@@ -13,8 +13,7 @@ use tokio_stream::{wrappers::SplitStream, StreamExt};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
 
-use crate::agents::tool_execution::ToolCallNotificationEmitter;
-use crate::subprocess::SubprocessExt;
+use crate::notifications::ToolCallNotificationEmitter;
 
 pub use super::shell_output_streaming::{
     parse_shell_output_notification, ShellOutputNotificationChunk, ShellOutputNotificationParams,
@@ -28,7 +27,7 @@ use super::shell_process::ShellProcess;
 /// When inside Flatpak, shell commands must be wrapped with `flatpak-spawn --host`
 /// to execute on the host system rather than inside the sandbox.
 #[cfg(not(windows))]
-pub(crate) fn is_flatpak() -> bool {
+pub fn is_flatpak() -> bool {
     std::path::Path::new("/.flatpak-info").exists()
 }
 
@@ -39,7 +38,7 @@ const FLATPAK_HOST_ARGS: [&str; 2] = ["--host", "--watch-bus"];
 /// ours, and nothing outside the sandbox can resolve the host's login-shell PATH
 /// for us, so pass it along explicitly.
 #[cfg(not(windows))]
-pub(crate) async fn flatpak_spawn_command() -> tokio::process::Command {
+pub async fn flatpak_spawn_command() -> tokio::process::Command {
     static HOST_LOGIN_PATH: tokio::sync::OnceCell<Option<String>> =
         tokio::sync::OnceCell::const_new();
     let host_path = HOST_LOGIN_PATH.get_or_init(resolve_host_login_path).await;
@@ -244,7 +243,7 @@ impl ShellTool {
             .await
     }
 
-    pub(crate) async fn shell_with_cwd_and_emitter(
+    pub async fn shell_with_cwd_and_emitter(
         &self,
         params: ShellParams,
         working_dir: Option<&std::path::Path>,
@@ -406,11 +405,7 @@ struct ExecutionOutput {
 }
 
 fn resolve_shell_timeout(timeout_secs: Option<u64>) -> u64 {
-    timeout_secs.unwrap_or_else(|| {
-        crate::config::Config::global()
-            .get_goose_default_extension_timeout()
-            .unwrap_or(crate::config::DEFAULT_EXTENSION_TIMEOUT)
-    })
+    timeout_secs.unwrap_or(300)
 }
 
 async fn run_command(
@@ -573,7 +568,7 @@ async fn build_shell_command(
     };
 
     #[cfg(not(windows))]
-    let mut command = {
+    let command = {
         let shell = unix_shell();
 
         if is_flatpak() {
@@ -591,7 +586,8 @@ async fn build_shell_command(
 
     #[cfg(windows)]
     apply_session_environment(&mut command, session_id);
-    command.set_no_window();
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
     command
 }
 
@@ -1023,9 +1019,9 @@ mod tests {
 
         let shell_command =
             flatpak_shell_command("bash", "echo hi", Some(dir.path()), Some("session-1")).await;
-        let hook_command = crate::hooks::flatpak_hook_command("echo hi", dir.path()).await;
 
-        for command in [&shell_command, &hook_command] {
+        {
+            let command = &shell_command;
             let command = command.as_std();
             let args: Vec<_> = command.get_args().collect();
             assert_eq!(command.get_program(), "flatpak-spawn");
