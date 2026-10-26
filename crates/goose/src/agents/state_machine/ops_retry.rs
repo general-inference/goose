@@ -16,7 +16,6 @@ use crate::conversation::message::{Message, MessageErrorKind, SystemNotification
 use crate::conversation::Conversation;
 use crate::session::{GoalState, Session};
 
-pub(super) const NUDGED: &str = "nudged";
 pub(super) const ATTEMPTS: &str = "attempts";
 
 fn retry_error(error: &str) -> Message {
@@ -52,12 +51,6 @@ impl RetryOperation {
         Ok(Conversation::new_unvalidated(
             conversation.messages()[..=kickoff].to_vec(),
         ))
-    }
-
-    fn goal_was_nudged(&self, messages: &[Message]) -> bool {
-        messages
-            .iter()
-            .any(|message| self.message_meta(message, NUDGED).is_some())
     }
 
     /// Attempts are counted on the kickoff message because a retry replaces the
@@ -181,17 +174,8 @@ impl Operation<Session, GooseEffect> for RetryOperation {
         }
 
         let state = GoalState::of(session);
-        if !self.goal_was_nudged(messages) {
-            if let Some(goal) = &state.goal {
-                let nudge = format!(
-                    "Before finishing, check whether the following goal has been fully met:\n\n\
-                     **Goal:** {goal}\n\n\
-                     If not, continue working toward it."
-                );
-                let mut message = Message::user()
-                    .with_text(&nudge)
-                    .with_visibility(false, true);
-                self.set_message_meta(&mut message, NUDGED, serde_json::json!(true));
+        if let Some(goal) = &state.goal {
+            if let Some(message) = goose_agent::goal::review_message(goal, messages) {
                 emit.message(Message::assistant().with_system_notification(
                     SystemNotificationType::InlineMessage,
                     format!("Goal: {goal}"),

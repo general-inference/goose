@@ -125,3 +125,15 @@ Compaction marks generated messages in their persisted operation metadata.
 repeat on an unchanged compacted tail. An irreducibly large request is attempted
 once and then follows bounded overflow recovery. Token counts remain estimates;
 this cannot guarantee that a provider accepts a request.
+
+## Goal review
+
+`goal::GoalReviewOperation` exposes the one-time goal check used by Goose's
+retry operation. Register it before inference with the user request as its goal
+to give a completed response one opportunity to verify the work and continue.
+The invisible review message persists in conversation metadata so restoring a
+conversation does not repeat the review in the same turn. Explicit output limits,
+model errors and pending tool requests are not converted into reviews.
+
+This is model self-review, not independent proof of task success. Keep the host's
+turn limits, approvals, cancellation and external verification in place.

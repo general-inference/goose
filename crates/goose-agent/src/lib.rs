@@ -1,6 +1,7 @@
 #[cfg(all(feature = "context-management", not(target_arch = "wasm32")))]
 pub mod compaction;
 pub mod events;
+pub mod goal;
 pub mod inference;
 pub mod machine;
 pub mod operation;

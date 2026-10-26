@@ -4,9 +4,9 @@ use self::calculator_extension::{value, ADD};
 use self::pipeline::MessageKind::{Agent, ToolCall};
 use self::pipeline::{test_pipeline, MAX_TURNS};
 use crate::agents::state_machine;
-use crate::agents::state_machine::ops_retry::NUDGED;
 use crate::agents::state_machine::Emitter;
 use crate::session::extension_data::{EnabledExtensionsState, ExtensionData, ExtensionState};
+use goose_agent::goal::NUDGED;
 
 mod agent_reply;
 mod calculator_extension;
