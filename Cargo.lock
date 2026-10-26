@@ -4445,6 +4445,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures",
+ "goose-context-management",
  "goose-provider-types",
  "goose-sdk-types",
  "js-sys",

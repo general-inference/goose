@@ -26,12 +26,16 @@ tracing-futures = { workspace = true }
 serde.workspace = true
 regex = { workspace = true, features = ["unicode-perl"] }
 goose-sdk-types = { version = "0.1.0-alpha.13", path = "../goose-sdk-types", default-features = false }
+goose-context-management = { version = "0.1.0-alpha.13", path = "../goose-context-management", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 rmcp = { workspace = true, features = ["local"] }
 
 [dev-dependencies]
 schemars.workspace = true
+
+[features]
+context-management = ["dep:goose-context-management"]
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 js-sys = "0.3.105"

@@ -7,12 +7,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agents::extension_manager::{ExtensionLease, ExtensionManager};
 use crate::agents::state_machine::{
-    BangShellOperation, CompactionOperation, DoctorOperation, EmptyResponseOperation,
-    ExitOnErrorOperation, GooseEffect, GooseInferenceProvider, GooseInferenceRequestPreparer,
-    InferenceRunner, MaxTurnsOperation, Operation, ProjectOperation, RecipeOperation,
-    RemainingToolCallsOperation, RetryOperation, SkillOperation, SlashCommandOperation,
-    StateMachine, StatusOperation, SteerOperation, SteerQueue, Step, StopHookOperation,
-    SubagentOperation, ToolApprovalOperation, ToolExecutionOperation, ToolPairCompactionOperation,
+    BangShellOperation, DoctorOperation, EmptyResponseOperation, ExitOnErrorOperation, GooseEffect,
+    GooseInferenceProvider, GooseInferenceRequestPreparer, InferenceRunner, MaxTurnsOperation,
+    Operation, ProjectOperation, RecipeOperation, RemainingToolCallsOperation, RetryOperation,
+    SkillOperation, SlashCommandOperation, StateMachine, StatusOperation, SteerOperation,
+    SteerQueue, Step, StopHookOperation, SubagentOperation, ToolApprovalOperation,
+    ToolExecutionOperation, ToolPairCompactionOperation,
 };
 use crate::agents::subagent_handler::ForegroundSubagentRunner;
 use crate::config::Config;
@@ -97,12 +97,14 @@ pub(crate) fn build_state_machine(
         Arc::new(BangShellOperation::new()),
     ];
     if !manages_own_context {
-        operations.push(Arc::new(CompactionOperation::new(
-            provider.clone(),
-            model_config.clone(),
-            context_limit,
-            compaction_threshold,
-        )));
+        operations.push(Arc::new(
+            crate::agents::state_machine::compaction_operation(
+                provider.clone(),
+                model_config.clone(),
+                context_limit,
+                compaction_threshold,
+            ),
+        ));
     }
     let remaining_operations: Vec<Arc<dyn Operation<Session, GooseEffect> + '_>> = vec![
         Arc::new(ToolPairCompactionOperation::new(

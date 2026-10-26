@@ -62,7 +62,7 @@ pub async fn compact_messages(
     };
     goose_context_management::conversation::compact_messages(
         &model,
-        Some(&GooseTokenEstimator),
+        Some(&GooseTokenEstimator::default()),
         &compaction_templates()?,
         conversation,
         manual_compact,
@@ -162,12 +162,15 @@ impl goose_context_management::CompactionModel for GooseCompactionModel<'_> {
     }
 }
 
-struct GooseTokenEstimator;
+#[derive(Default)]
+pub(crate) struct GooseTokenEstimator {
+    counter: tokio::sync::OnceCell<crate::token_counter::TokenCounter>,
+}
 
 #[async_trait::async_trait]
 impl goose_context_management::TokenEstimator for GooseTokenEstimator {
     async fn count_chat_tokens(&self, system: &str, messages: &[Message]) -> usize {
-        match create_token_counter().await {
+        match self.counter.get_or_try_init(create_token_counter).await {
             Ok(counter) => counter.count_chat_tokens(system, messages, &[]),
             Err(error) => {
                 warn!("Failed to create token counter: {error}");
@@ -177,7 +180,7 @@ impl goose_context_management::TokenEstimator for GooseTokenEstimator {
     }
 
     async fn count_text_tokens(&self, text: &str) -> usize {
-        match create_token_counter().await {
+        match self.counter.get_or_try_init(create_token_counter).await {
             Ok(counter) => counter.count_tokens(text),
             Err(error) => {
                 warn!("Failed to create token counter: {error}");
