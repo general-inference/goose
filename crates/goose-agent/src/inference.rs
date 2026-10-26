@@ -273,6 +273,7 @@ pub struct InferenceRunner<'a, S, E> {
     request_preparer: Arc<dyn InferenceRequestPreparer<S> + 'a>,
     request_guard: Option<Arc<dyn InferenceRequestGuard<S, E> + 'a>>,
     output: Mutex<InferenceOutput>,
+    allow_empty_after_tools: bool,
     effect: std::marker::PhantomData<fn() -> E>,
 }
 
@@ -370,6 +371,7 @@ impl<'a, S: MaybeSync, E: InferenceEffect> InferenceRunner<'a, S, E> {
             request_preparer: Arc::new(IdentityInferenceRequestPreparer),
             request_guard: None,
             output: Mutex::new(InferenceOutput::default()),
+            allow_empty_after_tools: true,
             effect: std::marker::PhantomData,
         }
     }
@@ -384,6 +386,14 @@ impl<'a, S: MaybeSync, E: InferenceEffect> InferenceRunner<'a, S, E> {
 
     pub fn with_request_guard(mut self, guard: Arc<dyn InferenceRequestGuard<S, E> + 'a>) -> Self {
         self.request_guard = Some(guard);
+        self
+    }
+
+    /// Whether an empty response after a successful tool may finish the turn.
+    /// Disable this when the host requires an explicit final answer; retries only
+    /// repeat inference, never the already executed tool.
+    pub fn with_empty_response_after_tools(mut self, allowed: bool) -> Self {
+        self.allow_empty_after_tools = allowed;
         self
     }
 
@@ -526,7 +536,7 @@ impl<S: MachineSession, E: InferenceEffect> Inference<S, E> for InferenceRunner<
             }
 
             let successful_tool_response =
-                ends_with_successful_tool_response(conversation.messages());
+                self.allow_empty_after_tools && ends_with_successful_tool_response(conversation.messages());
             let mut empty_responses = 0;
             let empty_output = loop {
             let attempt_start = self.output().usage.len();
