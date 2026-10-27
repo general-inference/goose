@@ -77,11 +77,11 @@ cannot undo external actions or stop blocking work that has already started.
 
 ## Skills
 
-`skills` provides argument substitution and loaded-skill formatting. On native
-platforms, it also discovers skills from explicit, ordered roots. Configuration
-paths, built-in skills, and tool registration remain host responsibilities;
-these helpers do not automatically change the agent pipeline. Filesystem
-discovery is not a secure file-open API.
+`skills` provides argument substitution, loaded-skill formatting and native discovery
+from explicit, ordered roots. `skills::tool` exposes Goose's `load_skill` schema and dispatch,
+including arguments, supporting-file selection and response bounds. Hosts supply a `SkillLoader`
+that enforces their filesystem policy during supporting-file reads. Configuration paths,
+built-in skills, tool registration and approval remain host responsibilities.
 
 ## WebAssembly
 

@@ -2,8 +2,11 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path};
 
+#[cfg(test)]
 const LOADED_FILE_PREFIX: &str = "# Loaded: ";
+#[cfg(test)]
 const LOADED_FILE_SEPARATOR: &str = "\n\n";
+#[cfg(test)]
 const LOADED_FILE_SUFFIX: &str = "\n\n---\nFile loaded into context.";
 const MAX_SOURCE_FILE_BYTES: usize = crate::scheduler::MAX_SCHEDULE_RECIPE_BYTES as usize;
 
@@ -13,46 +16,23 @@ enum ReadLimit {
     Bytes(usize),
 }
 
-pub(crate) fn load_supporting_file(
-    skill_dir: &Path,
-    relative: &Path,
-    skill_name: &str,
-) -> io::Result<String> {
-    load_supporting_file_with_limit(
-        skill_dir,
-        relative,
-        skill_name,
-        crate::agents::max_tool_response_size(),
-    )
-}
-
+#[cfg(test)]
 fn load_supporting_file_with_limit(
     skill_dir: &Path,
     relative: &Path,
     skill_name: &str,
     max_characters: usize,
 ) -> io::Result<String> {
-    let wrapper_characters = LOADED_FILE_PREFIX.chars().count()
-        + skill_name.chars().count()
-        + LOADED_FILE_SEPARATOR.chars().count()
-        + LOADED_FILE_SUFFIX.chars().count();
-    let content_limit = max_characters
-        .checked_sub(wrapper_characters)
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "maximum tool response size of {max_characters} characters is too small to load '{skill_name}'"
-                ),
-            )
-        })?;
-    let content = read_supporting_file_with_limit(skill_dir, relative, content_limit)?;
-    Ok(format!(
-        "{LOADED_FILE_PREFIX}{skill_name}{LOADED_FILE_SEPARATOR}{content}{LOADED_FILE_SUFFIX}"
-    ))
+    goose_agent::skills::tool::load_supporting_file(
+        skill_dir,
+        relative,
+        skill_name,
+        &super::GooseSkillLoader,
+        max_characters,
+    )
 }
 
-fn read_supporting_file_with_limit(
+pub(super) fn read_supporting_file_with_limit(
     skill_dir: &Path,
     relative: &Path,
     max_characters: usize,

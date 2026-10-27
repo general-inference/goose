@@ -348,6 +348,9 @@ prompt: |
   load_skill(name: "goose-doc-guide")
   load_skill(name: "web-search")
   ```
+  Also load one discovered supporting file by its skill-name/path and verify that an
+  unlisted supporting path returns a tool error.
+
   Verify the skill content is returned and can be read for each. This confirms all builtin skills are accessible.
 
   ### Load Tool - Knowledge Injection

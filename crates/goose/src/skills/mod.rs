@@ -7,9 +7,7 @@ pub mod client;
 mod supporting_files;
 
 pub use client::{SkillsClient, EXTENSION_NAME};
-pub(crate) use supporting_files::{
-    create_source_file, load_supporting_file, read_source_file, write_source_file,
-};
+pub(crate) use supporting_files::{create_source_file, read_source_file, write_source_file};
 
 use crate::config::{paths::Paths, Config};
 use crate::plugins::discovery::PluginScope;
@@ -119,6 +117,27 @@ fn resolve_docs_root_placeholder(skill: &SourceEntry, content: &str, docs_root: 
     }
 
     content.replace(GOOSE_DOCS_ROOT_PLACEHOLDER, docs_root)
+}
+
+pub(crate) struct GooseSkillLoader;
+
+impl goose_agent::skills::tool::SkillLoader for GooseSkillLoader {
+    fn render_skill(&self, skill: &SourceEntry, args: Option<&str>) -> Result<String> {
+        loaded_skill_context_with_args(skill, args)
+    }
+
+    fn read_supporting_file(
+        &self,
+        dir: &Path,
+        relative: &Path,
+        max_characters: usize,
+    ) -> std::io::Result<String> {
+        supporting_files::read_supporting_file_with_limit(
+            &dir.canonicalize()?,
+            relative,
+            max_characters,
+        )
+    }
 }
 
 pub fn loaded_skill_context_with_args(skill: &SourceEntry, args: Option<&str>) -> Result<String> {

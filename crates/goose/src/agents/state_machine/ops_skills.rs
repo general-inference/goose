@@ -1,14 +1,12 @@
 //! Makes filesystem skills available to inference and slash commands.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use goose_sdk_types::custom_requests::{SourceEntry, SourceType};
 use rmcp::model::{CallToolResult, ContentBlock, ErrorData, JsonObject, Tool};
-use schemars::{schema_for, JsonSchema};
-use serde::Deserialize;
 use serde_json::Value;
 use tracing_futures::Instrument;
 
@@ -33,30 +31,6 @@ const LOAD_SKILL_TOOL_NAME: &str = "load_skill";
 pub struct SkillOperation {
     hook_manager: HookManager,
     extension_lease: Arc<StdMutex<Option<Arc<ExtensionLease>>>>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-struct LoadSkillParams {
-    /// Name of the skill to load. Use "skill-name/path" to load a supporting file.
-    name: String,
-    /// Optional arguments to provide when loading the skill.
-    #[serde(default)]
-    args: Option<String>,
-}
-
-fn skill_tool() -> Result<Tool> {
-    let schema = serde_json::to_value(schema_for!(LoadSkillParams))?;
-    let schema = schema
-        .as_object()
-        .cloned()
-        .ok_or_else(|| anyhow!("load_skill schema is not an object"))?;
-    Ok(Tool::new(
-        LOAD_SKILL_TOOL_NAME,
-        "Load a skill's full content into your context so you can follow its instructions.\n\n\
-         Skills are listed in your system instructions. When you need to use one, \
-         load it first to get the detailed instructions.",
-        schema,
-    ))
 }
 
 fn skill_instructions(working_dir: &Path) -> Option<String> {
@@ -85,113 +59,12 @@ fn skill_instructions(working_dir: &Path) -> Option<String> {
 }
 
 fn execute_skill(working_dir: &Path, arguments: Option<JsonObject>) -> CallToolResult {
-    let params = arguments
-        .map(Value::Object)
-        .ok_or_else(|| "Missing arguments".to_string())
-        .and_then(|arguments| {
-            serde_json::from_value::<LoadSkillParams>(arguments)
-                .map_err(|error| format!("Invalid arguments: {error}"))
-        });
-    let params = match params {
-        Ok(params) => params,
-        Err(error) => return CallToolResult::error(vec![ContentBlock::text(error)]),
-    };
-    let skill_name = params.name.as_str();
-    let args = params.args.as_deref();
-    let skills = crate::skills::discover_skills(Some(working_dir));
-
-    if let Some(skill) = skills.iter().find(|skill| skill.name == skill_name) {
-        return match crate::skills::loaded_skill_context_with_args(skill, args) {
-            Ok(rendered) => CallToolResult::success(vec![ContentBlock::text(rendered)]),
-            Err(error) => CallToolResult::error(vec![ContentBlock::text(format!(
-                "Failed to parse skill arguments: {error}"
-            ))]),
-        };
-    }
-
-    if let Some((parent_skill_name, raw_relative_path)) = skill_name.split_once('/') {
-        let relative_path = raw_relative_path.replace('\\', "/");
-        if let Some(skill) = skills.iter().find(|skill| {
-            skill.name == parent_skill_name
-                && matches!(
-                    skill.source_type,
-                    SourceType::Skill | SourceType::BuiltinSkill
-                )
-        }) {
-            return load_supporting_file(skill, skill_name, &relative_path);
-        }
-    }
-
-    let suggestions: Vec<&str> = skills
-        .iter()
-        .filter(|skill| {
-            skill
-                .name
-                .to_lowercase()
-                .contains(&skill_name.to_lowercase())
-                || skill_name
-                    .to_lowercase()
-                    .contains(&skill.name.to_lowercase())
-        })
-        .take(3)
-        .map(|skill| skill.name.as_str())
-        .collect();
-    if suggestions.is_empty() {
-        CallToolResult::error(vec![ContentBlock::text(format!(
-            "Skill '{skill_name}' not found."
-        ))])
-    } else {
-        CallToolResult::error(vec![ContentBlock::text(format!(
-            "Skill '{skill_name}' not found. Did you mean: {}?",
-            suggestions.join(", ")
-        ))])
-    }
-}
-
-fn load_supporting_file(
-    skill: &SourceEntry,
-    skill_name: &str,
-    relative_path: &str,
-) -> CallToolResult {
-    let skill_dir = PathBuf::from(&skill.path);
-    for file_path in &skill.supporting_files {
-        let file_path = Path::new(file_path);
-        let Ok(relative) = file_path.strip_prefix(&skill_dir) else {
-            continue;
-        };
-        if relative.to_string_lossy().replace('\\', "/") != relative_path {
-            continue;
-        }
-        return match crate::skills::load_supporting_file(&skill_dir, relative, skill_name) {
-            Ok(content) => CallToolResult::success(vec![ContentBlock::text(content)]),
-            Err(error) => CallToolResult::error(vec![ContentBlock::text(format!(
-                "Failed to read '{skill_name}': {error}"
-            ))]),
-        };
-    }
-
-    let available: Vec<String> = skill
-        .supporting_files
-        .iter()
-        .filter_map(|file| {
-            Path::new(file)
-                .strip_prefix(&skill_dir)
-                .ok()
-                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
-        })
-        .take(10)
-        .collect();
-    if available.is_empty() {
-        CallToolResult::error(vec![ContentBlock::text(format!(
-            "Skill '{}' has no supporting files.",
-            skill.name
-        ))])
-    } else {
-        CallToolResult::error(vec![ContentBlock::text(format!(
-            "File '{skill_name}' not found. Available: {}",
-            available.join(", ")
-        ))])
-    }
+    goose_agent::skills::tool::load_skill(
+        &crate::skills::discover_skills(Some(working_dir)),
+        arguments,
+        &crate::skills::GooseSkillLoader,
+        crate::agents::max_tool_response_size(),
+    )
 }
 
 impl SkillOperation {
@@ -304,7 +177,7 @@ impl Operation<Session, GooseEffect> for SkillOperation {
     }
 
     async fn inference_tools(&self, _session: &Session) -> Result<Vec<Tool>> {
-        Ok(vec![skill_tool()?])
+        Ok(vec![goose_agent::skills::tool::skill_tool()])
     }
 
     async fn prompt_parts(
@@ -455,7 +328,17 @@ mod tests {
             properties: HashMap::new(),
         };
 
-        let result = load_supporting_file(&skill, "test-skill/nested/guide.md", "nested/guide.md");
+        let result = goose_agent::skills::tool::load_skill(
+            &[skill],
+            Some(
+                serde_json::json!({"name":"test-skill/nested/guide.md"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+            &crate::skills::GooseSkillLoader,
+            crate::agents::max_tool_response_size(),
+        );
 
         assert_eq!(result.is_error, Some(false));
         let text = result.content[0].as_text().expect("expected text");

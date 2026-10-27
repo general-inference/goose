@@ -4,6 +4,7 @@
 mod arguments;
 #[cfg(not(target_arch = "wasm32"))]
 mod discovery;
+pub mod tool;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use discovery::{discover_skills, discover_skills_with_filesystem, SkillFileSystem, SkillRoot};

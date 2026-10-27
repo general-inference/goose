@@ -1,5 +1,4 @@
 use super::discover_skills_with_config;
-use super::loaded_skill_context_with_args;
 use crate::agents::mcp_client::{Error, McpClientTrait};
 use crate::agents::ToolCallContext;
 use crate::config::Config;
@@ -7,9 +6,9 @@ use async_trait::async_trait;
 use goose_sdk_types::custom_requests::{SourceEntry, SourceType};
 use rmcp::model::{
     CallToolResult, ContentBlock, Implementation, InitializeResult, JsonObject, ListToolsResult,
-    ServerCapabilities, ServerNotification, Tool,
+    ServerCapabilities, ServerNotification,
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -66,33 +65,7 @@ impl McpClientTrait for SkillsClient {
         _next_cursor: Option<String>,
         _cancellation_token: CancellationToken,
     ) -> Result<ListToolsResult, Error> {
-        let schema = serde_json::json!({
-            "type": "object",
-            "required": ["name"],
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Name of the skill to load. Use \"skill-name/path\" to load a supporting file."
-                },
-                "args": {
-                    "type": "string",
-                    "description": "Optional arguments to provide when loading the skill."
-                }
-            }
-        });
-
-        let tool = Tool::new(
-            "load_skill",
-            "Load a skill's full content into your context so you can follow its instructions.\n\n\
-             Skills are listed in your system instructions. When you need to use one, \
-             load it first to get the detailed instructions.\n\n\
-             Examples:\n\
-             - load_skill(name: \"gdrive\") → Loads the gdrive skill instructions\n\
-             - load_skill(name: \"my-skill\", args: \"the arguments for the skill\") → Loads a skill with arguments\n\
-             - load_skill(name: \"my-skill/template.md\") → Loads a supporting file"
-                .to_string(),
-            schema.as_object().unwrap().clone(),
-        );
+        let tool = goose_agent::skills::tool::skill_tool();
 
         Ok(ListToolsResult {
             tools: vec![tool],
@@ -116,124 +89,16 @@ impl McpClientTrait for SkillsClient {
             ))]));
         }
 
-        let skill_name = arguments
-            .as_ref()
-            .and_then(|args| args.get("name"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        if skill_name.is_empty() {
-            return Ok(CallToolResult::error(vec![ContentBlock::text(
-                "Missing required parameter: name",
-            )]));
-        }
-        let args = arguments
-            .as_ref()
-            .and_then(|args| args.get("args"))
-            .and_then(|v| v.as_str());
-
         let working_dir = ctx
             .working_dir
             .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-        let skills = self.discover_skills(&working_dir);
-
-        if let Some(skill) = skills.iter().find(|s| s.name == skill_name) {
-            return match loaded_skill_context_with_args(skill, args) {
-                Ok(rendered) => Ok(CallToolResult::success(vec![ContentBlock::text(rendered)])),
-                Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "Failed to parse skill arguments: {}",
-                    e
-                ))])),
-            };
-        }
-
-        if let Some((parent_skill_name, raw_relative_path)) = skill_name.split_once('/') {
-            let relative_path = raw_relative_path.replace('\\', "/");
-            if let Some(skill) = skills.iter().find(|s| {
-                s.name == parent_skill_name
-                    && matches!(s.source_type, SourceType::Skill | SourceType::BuiltinSkill)
-            }) {
-                let listed_skill_dir = PathBuf::from(&skill.path);
-                let load_skill_dir = match listed_skill_dir.canonicalize() {
-                    Ok(path) => path,
-                    Err(e) => {
-                        return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                            "Failed to resolve '{}': {}",
-                            parent_skill_name, e
-                        ))]));
-                    }
-                };
-
-                for file_path in &skill.supporting_files {
-                    let file_path_buf = Path::new(file_path);
-                    let Ok(rel) = file_path_buf.strip_prefix(&listed_skill_dir) else {
-                        continue;
-                    };
-                    if rel.to_string_lossy().replace('\\', "/") != relative_path {
-                        continue;
-                    }
-
-                    let result = match super::load_supporting_file(&load_skill_dir, rel, skill_name)
-                    {
-                        Ok(content) => CallToolResult::success(vec![ContentBlock::text(content)]),
-                        Err(e) => CallToolResult::error(vec![ContentBlock::text(format!(
-                            "Failed to read '{}': {}",
-                            skill_name, e
-                        ))]),
-                    };
-                    return Ok(result);
-                }
-
-                let available: Vec<String> = skill
-                    .supporting_files
-                    .iter()
-                    .filter_map(|f| {
-                        Path::new(f)
-                            .strip_prefix(&listed_skill_dir)
-                            .ok()
-                            .map(|r| r.to_string_lossy().replace('\\', "/"))
-                    })
-                    .take(10)
-                    .collect();
-
-                return Ok(if available.is_empty() {
-                    CallToolResult::error(vec![ContentBlock::text(format!(
-                        "Skill '{}' has no supporting files.",
-                        skill.name
-                    ))])
-                } else {
-                    CallToolResult::error(vec![ContentBlock::text(format!(
-                        "File '{}' not found. Available: {}",
-                        skill_name,
-                        available.join(", ")
-                    ))])
-                });
-            }
-        }
-
-        let suggestions: Vec<&str> = skills
-            .iter()
-            .filter(|s| {
-                s.name.to_lowercase().contains(&skill_name.to_lowercase())
-                    || skill_name.to_lowercase().contains(&s.name.to_lowercase())
-            })
-            .take(3)
-            .map(|s| s.name.as_str())
-            .collect();
-
-        Ok(if suggestions.is_empty() {
-            CallToolResult::error(vec![ContentBlock::text(format!(
-                "Skill '{}' not found.",
-                skill_name
-            ))])
-        } else {
-            CallToolResult::error(vec![ContentBlock::text(format!(
-                "Skill '{}' not found. Did you mean: {}?",
-                skill_name,
-                suggestions.join(", ")
-            ))])
-        })
+        Ok(goose_agent::skills::tool::load_skill(
+            &self.discover_skills(&working_dir),
+            arguments,
+            &super::GooseSkillLoader,
+            crate::agents::max_tool_response_size(),
+        ))
     }
 
     fn get_info(&self) -> Option<&InitializeResult> {
