@@ -1,0 +1,1 @@
+The response returned from the tool call was larger ({{characters}} characters) and is stored in the file which you can use other tools to examine or search in: {{reference}}
