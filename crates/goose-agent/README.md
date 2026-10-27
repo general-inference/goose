@@ -91,7 +91,10 @@ finish pending tool calls and accept a final answer on the last permitted turn.
 
 `tool_output::process_tool_response` redirects oversized text using a host-supplied storage
 callback. The default Goose threshold is 200,000 characters; hosts choose their threshold,
-output lifetime and confined read access. Storage failure returns a bounded error rather than
+output lifetime and confined read access. With the native `tool-output` feature,
+`write_large_text_to_file` supplies Goose's retained temporary-file writer, optionally inside a
+host-provided directory. Files survive process exit until removed by temporary-file cleanup;
+hosts must retain any enclosing directory too. Storage failure returns a bounded error rather than
 sending the oversized body back to inference. Skills and developer shell output retain their
 own handling.
 

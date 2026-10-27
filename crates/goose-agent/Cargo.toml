@@ -39,6 +39,7 @@ test-case.workspace = true
 [features]
 context-management = ["dep:goose-context-management"]
 permissions = ["dep:fs2", "dep:tempfile"]
+tool-output = ["dep:tempfile"]
 project-context = ["dep:ignore", "dep:shell-words", "dep:libc"]
 prompt = ["dep:minijinja", "dep:indexmap"]
 

@@ -1,8 +1,7 @@
 use crate::config::Config;
 use rmcp::model::{CallToolResult, ErrorData};
-use std::io::Write;
 
-use goose_agent::tool_output::DEFAULT_LARGE_TEXT_THRESHOLD;
+use goose_agent::tool_output::{write_large_text_to_file, DEFAULT_LARGE_TEXT_THRESHOLD};
 
 pub(crate) fn max_tool_response_size() -> usize {
     Config::global()
@@ -13,23 +12,9 @@ pub(crate) fn max_tool_response_size() -> usize {
 pub fn process_tool_response(
     response: Result<CallToolResult, ErrorData>,
 ) -> Result<CallToolResult, ErrorData> {
-    goose_agent::tool_output::process_tool_response(
-        response,
-        max_tool_response_size(),
-        write_large_text_to_file,
-    )
-}
-
-/// Write large text content to a temporary file
-fn write_large_text_to_file(content: &str) -> Result<String, std::io::Error> {
-    let mut file = tempfile::Builder::new()
-        .prefix("goose_mcp_response_")
-        .suffix(".txt")
-        .tempfile()?;
-    file.write_all(content.as_bytes())?;
-    let (_, file_path) = file.keep()?;
-
-    Ok(file_path.to_string_lossy().to_string())
+    goose_agent::tool_output::process_tool_response(response, max_tool_response_size(), |text| {
+        write_large_text_to_file(text, None)
+    })
 }
 
 #[cfg(test)]
@@ -188,8 +173,8 @@ mod tests {
 
     #[test]
     fn test_large_response_files_have_unique_paths() {
-        let first_path = write_large_text_to_file("first response").unwrap();
-        let second_path = write_large_text_to_file("second response").unwrap();
+        let first_path = write_large_text_to_file("first response", None).unwrap();
+        let second_path = write_large_text_to_file("second response", None).unwrap();
         let paths_are_distinct = first_path != second_path;
         let first_content = fs::read_to_string(&first_path).unwrap();
         let second_content = fs::read_to_string(&second_path).unwrap();
@@ -209,7 +194,7 @@ mod tests {
     fn test_large_response_file_is_owner_only() {
         use std::os::unix::fs::PermissionsExt;
 
-        let file_path = write_large_text_to_file("sensitive response").unwrap();
+        let file_path = write_large_text_to_file("sensitive response", None).unwrap();
         let metadata = fs::metadata(&file_path).unwrap();
         let mode = metadata.permissions().mode();
         let content = fs::read_to_string(&file_path).unwrap();

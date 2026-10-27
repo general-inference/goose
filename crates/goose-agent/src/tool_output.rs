@@ -32,6 +32,27 @@ pub fn process_tool_response(
     Ok(result)
 }
 
+/// Save a response using Goose's retained temporary-file behavior. The file is
+/// not deleted when its owner or process exits; OS temporary-file cleanup still
+/// applies. A supplied directory must itself outlive the restored conversation.
+#[cfg(all(feature = "tool-output", not(target_arch = "wasm32")))]
+pub fn write_large_text_to_file(
+    content: &str,
+    directory: Option<&std::path::Path>,
+) -> std::io::Result<String> {
+    use std::io::Write;
+    let mut builder = tempfile::Builder::new();
+    builder.prefix("goose_mcp_response_").suffix(".txt");
+    let mut file = match directory {
+        Some(directory) => builder.tempfile_in(directory)?,
+        None => builder.tempfile()?,
+    };
+    file.write_all(content.as_bytes())?;
+    let reference = file.path().canonicalize()?;
+    file.keep()?;
+    Ok(reference.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
