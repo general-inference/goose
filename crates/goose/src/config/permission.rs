@@ -7,13 +7,16 @@ static PERMISSION_MANAGER: LazyLock<Arc<PermissionManager>> =
     LazyLock::new(|| Arc::new(PermissionManager::new(Paths::config_dir())));
 
 #[derive(Debug)]
-pub struct PermissionManager(goose_agent::permission::store::PermissionManager);
+pub struct PermissionManager(Arc<goose_agent::permission::store::PermissionManager>);
 
 impl PermissionManager {
     pub fn new(config_dir: std::path::PathBuf) -> Self {
-        Self(goose_agent::permission::store::PermissionManager::new(
-            config_dir,
+        Self(Arc::new(
+            goose_agent::permission::store::PermissionManager::new(config_dir),
         ))
+    }
+    pub(crate) fn shared(&self) -> Arc<goose_agent::permission::store::PermissionManager> {
+        self.0.clone()
     }
     pub fn instance() -> Arc<Self> {
         Arc::clone(&PERMISSION_MANAGER)

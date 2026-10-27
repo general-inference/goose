@@ -1,5 +1,6 @@
 use crate::agents::platform_extensions::MANAGE_EXTENSIONS_TOOL_NAME_COMPLETE;
 use crate::agents::provider_manager::ProviderManager;
+#[cfg(test)]
 use crate::config::permission::PermissionLevel;
 use crate::config::{GooseMode, PermissionManager};
 use crate::conversation::message::{Message, ToolRequest};
@@ -7,30 +8,16 @@ use crate::permission::permission_judge::{detect_read_only_requests, PermissionC
 use crate::tool_inspection::{InspectionAction, InspectionResult, ToolInspector};
 use anyhow::Result;
 use async_trait::async_trait;
+use goose_agent::permission::{policy::PermissionPolicy, Decision};
 use rmcp::model::Tool;
-use std::collections::HashSet;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 /// Permission Inspector that handles tool permission checking
 pub struct PermissionInspector {
     pub permission_manager: Arc<PermissionManager>,
     providers: Arc<ProviderManager>,
     session_manager: Arc<crate::session::SessionManager>,
-    readonly_tools: RwLock<HashSet<String>>,
-}
-
-fn cache_non_readonly_decision(
-    permission_manager: &PermissionManager,
-    candidate: &ToolRequest,
-    is_readonly: bool,
-) {
-    if is_readonly {
-        return;
-    }
-    if let Ok(tool_call) = &candidate.tool_call {
-        permission_manager
-            .update_smart_approve_permission(&tool_call.name, PermissionLevel::AskBefore);
-    }
+    policy: PermissionPolicy,
 }
 
 impl PermissionInspector {
@@ -40,31 +27,21 @@ impl PermissionInspector {
         session_manager: Arc<crate::session::SessionManager>,
     ) -> Self {
         Self {
+            policy: PermissionPolicy::new(Some(permission_manager.shared())),
             permission_manager,
             providers,
             session_manager,
-            readonly_tools: RwLock::new(HashSet::new()),
         }
     }
 
     // readonly_tools is per-agent to avoid concurrent session clobbering; write-annotated
     // tools are cached globally via PermissionManager.
     pub fn apply_tool_annotations(&self, tools: &[Tool]) {
-        let mut readonly_annotated = HashSet::new();
-        for tool in tools {
-            let Some(anns) = &tool.annotations else {
-                continue;
-            };
-            if anns.read_only_hint == Some(true) {
-                readonly_annotated.insert(tool.name.to_string());
-            }
-        }
-        *self.readonly_tools.write().unwrap() = readonly_annotated;
-        self.permission_manager.apply_tool_annotations(tools);
+        self.policy.apply_tool_annotations(tools);
     }
 
     pub fn is_readonly_annotated_tool(&self, tool_name: &str) -> bool {
-        self.readonly_tools.read().unwrap().contains(tool_name)
+        self.policy.is_readonly_annotated_tool(tool_name)
     }
 
     /// Process inspection results into permission decisions
@@ -149,21 +126,16 @@ impl ToolInspector for PermissionInspector {
         goose_mode: GooseMode,
     ) -> Result<Vec<InspectionResult>> {
         let mut results = Vec::new();
-        let permission_manager = &self.permission_manager;
         let mut llm_detect_candidates: Vec<&ToolRequest> = Vec::new();
 
         for request in tool_requests {
             if let Ok(tool_call) = &request.tool_call {
                 let tool_name = &tool_call.name;
 
-                let action = match goose_agent::permission::decide(
+                let action = match self.policy.decide(
                     goose_mode,
-                    permission_manager.get_user_permission(tool_name).as_ref(),
-                    self.is_readonly_annotated_tool(tool_name),
+                    tool_name,
                     tool_name == MANAGE_EXTENSIONS_TOOL_NAME_COMPLETE,
-                    permission_manager
-                        .get_smart_approve_permission(tool_name)
-                        .as_ref(),
                 ) {
                     goose_agent::permission::Decision::Skip => continue,
                     goose_agent::permission::Decision::Allow => InspectionAction::Allow,
@@ -216,23 +188,24 @@ impl ToolInspector for PermissionInspector {
                 Ok(session) => self.providers.provider_for(&session).await.ok(),
                 Err(_) => None,
             };
-            let detected_request_ids: HashSet<String> = match provider {
-                Some(provider) => detect_read_only_requests(
-                    provider,
-                    &self.session_manager,
-                    session_id,
-                    llm_detect_candidates.to_vec(),
-                )
-                .await
-                .into_iter()
-                .collect(),
+            let detected_request_ids: Vec<String> = match provider {
+                Some(provider) => {
+                    detect_read_only_requests(
+                        provider,
+                        &self.session_manager,
+                        session_id,
+                        llm_detect_candidates.to_vec(),
+                    )
+                    .await
+                }
                 None => Default::default(),
             };
 
-            for candidate in &llm_detect_candidates {
-                let is_readonly = detected_request_ids.contains(&candidate.id);
-
-                cache_non_readonly_decision(permission_manager, candidate, is_readonly);
+            for (candidate, decision) in llm_detect_candidates.iter().zip(
+                self.policy
+                    .resolve_classification(&llm_detect_candidates, &detected_request_ids),
+            ) {
+                let is_readonly = decision == Decision::Allow;
 
                 results.push(InspectionResult {
                     tool_request_id: candidate.id.clone(),
@@ -284,7 +257,8 @@ mod tests {
         let inspector =
             PermissionInspector::new(Arc::clone(&pm), Default::default(), session_manager);
         if smart_approved {
-            *inspector.readonly_tools.write().unwrap() = ["tool".to_string()].into_iter().collect();
+            inspector.apply_tool_annotations(&[Tool::new("tool", "test", serde_json::Map::new())
+                .annotate(rmcp::model::ToolAnnotations::new().read_only(true))]);
         }
         let req = ToolRequest {
             id: "req".into(),
@@ -358,7 +332,7 @@ mod tests {
 
     #[test]
     fn smart_approve_only_caches_negative_name_wide_decisions() {
-        let pm = PermissionManager::new(tempfile::tempdir().unwrap().keep());
+        let pm = Arc::new(PermissionManager::new(tempfile::tempdir().unwrap().keep()));
         let req = ToolRequest {
             id: "read-request".into(),
             tool_call: Ok(
@@ -370,10 +344,11 @@ mod tests {
             tool_meta: None,
         };
 
-        cache_non_readonly_decision(&pm, &req, true);
+        let policy = PermissionPolicy::new(Some(pm.shared()));
+        policy.resolve_classification(&[&req], std::slice::from_ref(&req.id));
         assert_eq!(pm.get_smart_approve_permission("multipurpose"), None);
 
-        cache_non_readonly_decision(&pm, &req, false);
+        policy.resolve_classification(&[&req], &[]);
         assert_eq!(
             pm.get_smart_approve_permission("multipurpose"),
             Some(PermissionLevel::AskBefore)

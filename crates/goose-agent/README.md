@@ -83,6 +83,24 @@ including arguments, supporting-file selection and response bounds. Hosts supply
 that enforces their filesystem policy during supporting-file reads. Configuration paths,
 built-in skills, tool registration and approval remain host responsibilities.
 
+## Shared agent policies
+
+`turn_limit::MaxTurnsOperation` enforces an autonomous turn budget and emits a persisted
+terminal marker recognized by `is_turn_limit_message`. Hosts can enable tool settlement to
+finish pending tool calls and accept a final answer on the last permitted turn.
+
+`tool_output::process_tool_response` redirects oversized text using a host-supplied storage
+callback. The default Goose threshold is 200,000 characters; hosts choose their threshold,
+output lifetime and confined read access. Storage failure returns a bounded error rather than
+sending the oversized body back to inference. Skills and developer shell output retain their
+own handling.
+
+With the native `permissions` feature, `permission::policy::PermissionPolicy` coordinates
+per-agent annotations, explicit user rules and negative-only smart-approval caching. Hosts
+classify the returned Judge candidates with `detect_read_only_requests`, then resolve the
+batch by request ID with `resolve_classification`. Provider selection, timeout/cancellation,
+security inspectors and approval UI remain host responsibilities.
+
 ## WebAssembly
 
 The crate builds for `wasm32-unknown-unknown` and runs without a tokio runtime,

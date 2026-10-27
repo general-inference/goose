@@ -1,5 +1,7 @@
 //! Goose tool permissions and read-only classification, independent of session storage.
 #[cfg(all(feature = "permissions", not(target_arch = "wasm32")))]
+pub mod policy;
+#[cfg(all(feature = "permissions", not(target_arch = "wasm32")))]
 pub mod store;
 use goose_provider_types::conversation::{
     message::{Message, MessageContent, ToolRequest},

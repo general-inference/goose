@@ -6,6 +6,7 @@ author:
 
 activities:
   - Initialize test workspace and logging infrastructure
+  - Validate shared GDK oversized-response storage, turn-limit markers, and conservative permission caching
   - Test file operations (create, read, update, delete, undo)
   - Validate shared GDK repository hints and host filesystem access
   - Validate shared GDK prompt composition with explicit host inputs
