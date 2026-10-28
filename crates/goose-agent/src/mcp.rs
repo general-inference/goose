@@ -4,7 +4,10 @@
 //! The MCP SDK owns protocol negotiation, OAuth discovery, PKCE, token validation and refresh.
 
 use rmcp::model::{CallToolRequestParams, CallToolResult, ClientConfig, Tool};
-use rmcp::service::{ClientInitializeError, PeerRequestOptions, RequestHandle, RunningService};
+use rmcp::service::{
+    ClientInitializeError, ClientLifecycleMode, ClientServiceExt, PeerRequestOptions,
+    RequestHandle, RunningService,
+};
 use rmcp::transport::auth::{AuthClient, AuthorizationManager, CredentialStore};
 use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransportConfig, StreamableHttpError,
@@ -12,7 +15,7 @@ use rmcp::transport::streamable_http_client::{
 use rmcp::transport::{
     DynamicTransportError, IntoTransport, StreamableHttpClientTransport, TokioChildProcess,
 };
-use rmcp::{RoleClient, ServiceError, ServiceExt};
+use rmcp::{RoleClient, ServiceError};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -47,7 +50,16 @@ impl Connection {
         T: IntoTransport<RoleClient, E, A>,
         E: std::error::Error + From<std::io::Error> + Send + Sync + 'static,
     {
-        let connect = ClientConfig::default().serve(transport);
+        let connect = ClientConfig::default().serve_with_lifecycle(
+            transport,
+            ClientLifecycleMode::Auto {
+                preferred_versions: vec![
+                    rmcp::model::ProtocolVersion::V_2026_07_28,
+                    rmcp::model::ProtocolVersion::V_2025_11_25,
+                ],
+                legacy_version: Some(rmcp::model::ProtocolVersion::V_2025_11_25),
+            },
+        );
         tokio::select! {
             biased;
             () = cancel.cancelled() => Err(ConnectionError::Cancelled),
@@ -131,7 +143,7 @@ impl Connection {
             if cursor.is_none() {
                 return Ok(tools);
             }
-            if !seen.insert(cursor.clone()) || tools.len() > 10_000 {
+            if !seen.insert(cursor.clone()) || seen.len() > 1_000 || tools.len() > 10_000 {
                 return Err(ServiceError::TransportClosed);
             }
         }
