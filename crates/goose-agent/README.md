@@ -207,3 +207,19 @@ global paths prevents global hints from being loaded. The tracker can be rebuilt
 from persisted tool arguments before inference, without separately persisting its
 in-memory state. It discovers hints after tool arguments are recorded; it does not
 intercept or authorize a tool's first write.
+
+## Embedded MCP connections
+
+Enable the native-only `mcp` feature to use `mcp::Connection` with a host-configured
+stdio process or streamable HTTP client. It preserves tool schemas and results,
+follows paginated discovery, and sends MCP cancellation on timeout or cancellation.
+Connection checks never open a browser. `ConnectionError::AuthenticationRequired`
+lets a host request sign-in only when needed.
+
+Use `stored_authorization` with a host `CredentialStore` to reuse and refresh an
+existing OAuth session. For interactive sign-in, the re-exported MCP SDK
+`AuthorizationRequest` and `AuthorizationSession` handle discovery, client
+registration, PKCE, state, and issuer validation; the host owns its browser and
+callback UI. No Goose-global configuration or keychain is required. Hosts still
+own server consent, credentials, process isolation, tool permissions, and output
+policy.

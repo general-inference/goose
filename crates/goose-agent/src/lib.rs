@@ -21,3 +21,6 @@ pub mod turn_context;
 
 pub mod tool_output;
 pub mod turn_limit;
+
+#[cfg(all(feature = "mcp", not(target_arch = "wasm32")))]
+pub mod mcp;

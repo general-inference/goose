@@ -28,6 +28,8 @@ regex = { workspace = true, features = ["unicode-perl"] }
 goose-sdk-types = { version = "0.1.0-alpha.13", path = "../goose-sdk-types", default-features = false }
 minijinja = { version = "2.18", default-features = false, features = ["loader", "multi_template", "serde", "builtins"], optional = true }
 indexmap = { version = "2.9", default-features = false, features = ["serde", "std"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["rustls"], optional = true }
+thiserror = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 rmcp = { workspace = true, features = ["local"] }
@@ -37,6 +39,7 @@ schemars.workspace = true
 test-case.workspace = true
 
 [features]
+mcp = ["tokio/io-util", "tokio/net", "tokio/process", "dep:reqwest", "dep:thiserror", "rmcp/client", "rmcp/transport-child-process", "rmcp/transport-streamable-http-client-reqwest", "rmcp/auth"]
 context-management = ["dep:goose-context-management"]
 permissions = ["dep:fs2", "dep:tempfile"]
 tool-output = ["dep:tempfile"]
