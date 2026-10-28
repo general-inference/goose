@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-tokio = { workspace = true, features = ["macros", "sync", "rt", "time", "io-util", "net", "process"] }
+tokio = { workspace = true, features = ["macros", "sync", "rt", "time"] }
 tokio-util = { workspace = true, features = ["compat"] }
 async-trait = { workspace = true }
 goose-provider-types = { version = "0.1.0-alpha.13", path = "../goose-provider-types", default-features = false }
@@ -39,7 +39,7 @@ schemars.workspace = true
 test-case.workspace = true
 
 [features]
-mcp = ["dep:reqwest", "dep:thiserror", "rmcp/client", "rmcp/transport-child-process", "rmcp/transport-streamable-http-client-reqwest", "rmcp/auth"]
+mcp = ["tokio/io-util", "tokio/net", "tokio/process", "dep:reqwest", "dep:thiserror", "rmcp/client", "rmcp/transport-child-process", "rmcp/transport-streamable-http-client-reqwest", "rmcp/auth"]
 context-management = ["dep:goose-context-management"]
 permissions = ["dep:fs2", "dep:tempfile"]
 tool-output = ["dep:tempfile"]
