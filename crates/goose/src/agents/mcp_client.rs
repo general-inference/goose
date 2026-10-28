@@ -1,6 +1,7 @@
 use crate::action_required_manager::{ActionRequiredManager, ElicitationOutcome};
 use crate::agents::tool_execution::ToolCallContext;
 use crate::session_context::{SESSION_ID_HEADER, TOOL_CALL_REQUEST_ID_HEADER, WORKING_DIR_HEADER};
+use goose_agent::mcp::await_response;
 #[expect(deprecated)]
 use rmcp::model::{
     ElicitRequestParams, ElicitResult, ListRootsResult, LoggingMessageNotification, Root,
@@ -10,19 +11,18 @@ use rmcp::model::{
 };
 use rmcp::{
     model::{
-        CallToolRequestParams, CallToolResult, CancelledNotificationParam, ClientCapabilities,
-        ClientConfig, ClientRequest, GetPromptRequestParams, GetPromptResult, Implementation,
-        InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourcesResult,
-        ListToolsResult, Notification, PaginatedRequestParams, ProtocolVersion,
-        ReadResourceRequestParams, ReadResourceResult, Request, RequestId, RequestOptionalParam,
-        ServerNotification, ServerResult,
+        CallToolRequestParams, CallToolResult, ClientCapabilities, ClientConfig, ClientRequest,
+        GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams,
+        InitializeResult, ListPromptsResult, ListResourcesResult, ListToolsResult, Notification,
+        PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams, ReadResourceResult,
+        Request, RequestOptionalParam, ServerNotification, ServerResult,
     },
     service::{
         ClientInitializeError, ClientLifecycleMode, ClientServiceExt, PeerRequestOptions,
-        RequestContext, RequestHandle, RunningService, ServiceRole,
+        RequestContext, RunningService,
     },
     transport::IntoTransport,
-    ClientHandler, ErrorData, Peer, RoleClient, ServiceError,
+    ClientHandler, ErrorData, RoleClient, ServiceError,
 };
 use serde_json::Value;
 use std::{
@@ -615,40 +615,6 @@ impl McpClient {
 
         await_response(handle, self.timeout, &cancel_token).await
     }
-}
-
-async fn await_response(
-    handle: RequestHandle<RoleClient>,
-    timeout: Duration,
-    cancel_token: &CancellationToken,
-) -> Result<<RoleClient as ServiceRole>::PeerResp, ServiceError> {
-    let receiver = handle.rx;
-    let peer = handle.peer;
-    let request_id = handle.id;
-    tokio::select! {
-        result = receiver => {
-            result.map_err(|_e| ServiceError::TransportClosed)?
-        }
-        _ = tokio::time::sleep(timeout) => {
-            send_cancel_message(&peer, request_id, Some("timed out".to_owned())).await?;
-            Err(ServiceError::Timeout{timeout})
-        }
-        _ = cancel_token.cancelled() => {
-            send_cancel_message(&peer, request_id, Some("operation cancelled".to_owned())).await?;
-            Err(ServiceError::Cancelled { reason: None })
-        }
-    }
-}
-
-async fn send_cancel_message(
-    peer: &Peer<RoleClient>,
-    request_id: RequestId,
-    reason: Option<String>,
-) -> Result<(), ServiceError> {
-    peer.send_notification(
-        Notification::new(CancelledNotificationParam::new(Some(request_id), reason)).into(),
-    )
-    .await
 }
 
 #[async_trait::async_trait]
