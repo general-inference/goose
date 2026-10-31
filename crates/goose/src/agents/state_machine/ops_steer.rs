@@ -1,44 +1,35 @@
 //! Adds queued user guidance when the agent is between model and tool turns.
 
-use std::collections::VecDeque;
 use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use tokio::sync::Mutex;
 
 use crate::agents::state_machine::effects::GooseEffect;
-use crate::agents::state_machine::{
-    applied, ends_turn, last_effective_role, messages_since_kickoff, not_applicable, Emitter,
-    Operation, OperationResult,
-};
+use crate::agents::state_machine::{Emitter, Operation, OperationResult};
 use crate::conversation::message::Message;
-use crate::conversation::{Conversation, EffectiveRole};
+use crate::conversation::Conversation;
 use crate::hooks::{HookContext, HookEvent, HookManager};
 use crate::session::Session;
+pub(crate) use goose_agent::steering::SteerQueue;
+use goose_agent::steering::{SteerHook, SteerOperation as SharedSteerOperation};
 
-pub(crate) type SteerQueue = Arc<Mutex<VecDeque<Message>>>;
+pub struct SteerOperation(SharedSteerOperation<Session>);
 
-pub struct SteerOperation {
-    queue: SteerQueue,
-    hook_manager: HookManager,
-    drained: std::sync::Mutex<Vec<Message>>,
+struct PromptHook(HookManager);
+
+#[async_trait]
+impl SteerHook<Session> for PromptHook {
+    async fn submitted(&self, session: &Session, message: &Message) {
+        let context = HookContext::new(HookEvent::UserPromptSubmit, &session.id)
+            .with_message(message.agent_visible_content().as_concat_text());
+        self.0.emit(HookEvent::UserPromptSubmit, context).await;
+    }
 }
 
 impl SteerOperation {
     pub(crate) fn new(queue: SteerQueue, hook_manager: HookManager) -> Self {
-        Self {
-            queue,
-            hook_manager,
-            drained: std::sync::Mutex::default(),
-        }
-    }
-
-    fn take_drained(&self) -> Vec<GooseEffect> {
-        std::mem::take(&mut *self.drained.lock().unwrap())
-            .into_iter()
-            .map(GooseEffect::from)
-            .collect()
+        Self(SharedSteerOperation::new(queue).with_hook(Arc::new(PromptHook(hook_manager))))
     }
 }
 
@@ -50,11 +41,13 @@ impl Operation<Session, GooseEffect> for SteerOperation {
 
     async fn finalize_cancellation(
         &self,
-        _session: &Session,
-        _conversation: &Conversation,
-        _emit: &Emitter,
+        session: &Session,
+        conversation: &Conversation,
+        emit: &Emitter,
     ) -> Vec<GooseEffect> {
-        self.take_drained()
+        self.0
+            .finalize_cancellation(session, conversation, emit)
+            .await
     }
 
     async fn run(
@@ -63,36 +56,6 @@ impl Operation<Session, GooseEffect> for SteerOperation {
         conversation: &Conversation,
         emit: &Emitter,
     ) -> Result<OperationResult<GooseEffect>> {
-        let messages = messages_since_kickoff(conversation)?;
-        let between_turns =
-            ends_turn(messages) || last_effective_role(messages)? == EffectiveRole::Tool;
-        if !between_turns {
-            return not_applicable();
-        }
-
-        let pending: Vec<_> = self
-            .queue
-            .lock()
-            .await
-            .drain(..)
-            .map(Message::with_steer)
-            .collect();
-        if pending.is_empty() {
-            return not_applicable();
-        }
-
-        let mut drained = Vec::with_capacity(pending.len());
-        for message in pending {
-            drained.push(emit.message(message));
-        }
-        *self.drained.lock().unwrap() = drained.clone();
-        for message in drained {
-            let context = HookContext::new(HookEvent::UserPromptSubmit, &session.id)
-                .with_message(message.agent_visible_content().as_concat_text());
-            self.hook_manager
-                .emit(HookEvent::UserPromptSubmit, context)
-                .await;
-        }
-        applied(self.take_drained())
+        self.0.run(session, conversation, emit).await
     }
 }

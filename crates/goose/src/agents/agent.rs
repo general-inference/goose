@@ -353,11 +353,7 @@ impl Agent {
     }
 
     pub async fn steer(&self, session_id: &str, message: Message) {
-        self.steer_queue(session_id)
-            .await
-            .lock()
-            .await
-            .push_back(message);
+        self.steer_queue(session_id).await.submit(message);
     }
 
     pub async fn discard_pending_steers(&self, session_id: &str) {

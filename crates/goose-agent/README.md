@@ -52,6 +52,29 @@ predicates they need: `messages_since_kickoff`, `last_effective_role`,
 remember that it already did something, it records that on the message itself via
 `Operation::set_message_meta` / `message_meta` rather than in memory.
 
+## Steering an active run
+
+`steering::SteerQueue` is a cloneable input handle for guidance submitted while
+an agent is working. `submit` synchronously returns the queued message with a
+stable ID and steering metadata, preserving an existing ID when provided.
+Keep the queue across executions to retain guidance that has not been delivered.
+
+Register `steering::SteerOperation::new(queue.clone())` before inference and
+end-of-turn operations. It drains guidance in FIFO order after an assistant
+response or settled tool results, never between an outstanding tool request and
+its response. The returned append-message effects must be persisted by the host.
+Hosts that accept direction during startup or interrupt/resume can enable
+`with_kickoff_steering(true)` to insert queued messages at a user-message boundary,
+before the first inference. This is disabled by default and still requires settled
+tool requests.
+
+An optional `SteerHook` observes emitted messages; emission alone does not confirm
+persistence or that the model has followed the instruction. Cancellation retains
+already emitted messages in finalization effects, including when a hook is pending.
+
+Hosts own transport, acknowledgments after persistence, follow-up task queues and
+interrupt/resume policy. `clear` discards only guidance still in the queue.
+
 ## Cancellation
 
 On Stop, the machine drops the running step's future, including inference
