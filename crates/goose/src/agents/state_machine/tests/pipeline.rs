@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use anyhow::Result;
@@ -343,11 +343,11 @@ impl TestPipeline {
     }
 
     pub(super) async fn steer(&self, message: Message) {
-        self.steer_queue.lock().await.push_back(message);
+        self.steer_queue.submit(message);
     }
 
     pub(super) async fn has_pending_steers(&self) -> bool {
-        !self.steer_queue.lock().await.is_empty()
+        !self.steer_queue.is_empty()
     }
 
     pub(super) fn calculator_total(&self) -> i64 {
@@ -867,7 +867,7 @@ async fn build_test_pipeline(
         calculator: calculator.clone(),
         session_id: session.id.clone(),
         working_dir: session.working_dir.clone(),
-        steer_queue: Arc::new(tokio::sync::Mutex::new(VecDeque::new())),
+        steer_queue: SteerQueue::default(),
         max_turns: MAX_TURNS,
         scheduler,
         subagent_host,
