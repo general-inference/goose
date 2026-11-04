@@ -6,6 +6,7 @@ pub mod inference;
 pub mod machine;
 pub mod operation;
 pub mod skills;
+pub mod steering;
 pub mod subagent;
 pub mod tool;
 
