@@ -287,6 +287,9 @@ async fn recent_start(
                 .iter()
                 .any(|content| matches!(content, MessageContent::ToolResponse(_)))
         {
+            if !messages[..index].iter().any(Message::is_agent_visible) {
+                break;
+            }
             start = Some(index);
             turns += 1;
             if turns == recent.turns {
@@ -296,5 +299,5 @@ async fn recent_start(
     }
     // At least one earlier visible message must be summarized; retaining everything
     // would leave no room and can retrigger automatic compaction immediately.
-    start.filter(|start| messages[..*start].iter().any(Message::is_agent_visible))
+    start
 }
