@@ -495,3 +495,109 @@ async fn test_progressive_removal_on_context_exceeded() {
         result.err()
     );
 }
+
+#[tokio::test]
+async fn recent_history_retains_whole_turns_within_budget() {
+    use goose_context_management::conversation::{
+        compact_messages_with_recent_history, RecentHistory,
+    };
+    let model = MockProvider::new(Message::assistant().with_text("Earlier decisions."), 8192);
+    let history = Conversation::new_unvalidated([
+        Message::user().with_text("Older request"),
+        Message::assistant().with_text("Large old context ".repeat(100)),
+        Message::user().with_text("Keep this exact phrase: café λ"),
+        Message::assistant().with_tool_request("read", Ok(CallToolRequestParams::new("read_file"))),
+        Message::user().with_tool_response(
+            "read",
+            Ok(rmcp::model::CallToolResult::success(vec![
+                ContentBlock::text("Exact tool result"),
+            ])),
+        ),
+        Message::assistant().with_text("Exact recent answer"),
+        Message::user().with_text("Current request"),
+    ]);
+    for manual in [false, true] {
+        let result = compact_messages_with_recent_history(
+            &model,
+            Some(&Estimator),
+            &Templates::default(),
+            &history,
+            manual,
+            RecentHistory {
+                turns: 2,
+                max_tokens: 512,
+            },
+        )
+        .await
+        .unwrap();
+        let visible = result.conversation.agent_visible_messages();
+        assert!(!visible
+            .iter()
+            .any(|m| m.as_concat_text().contains("Large old context")));
+        assert_eq!(
+            visible
+                .iter()
+                .filter(|m| m.as_concat_text() == "Current request")
+                .count(),
+            1
+        );
+        let tail = &visible[visible.len() - 5..];
+        for (actual, original) in tail.iter().zip(&history.messages()[2..]) {
+            assert_eq!(actual.content, original.content);
+        }
+        assert_eq!(
+            result
+                .conversation
+                .iter()
+                .filter(|m| m.is_user_visible())
+                .count(),
+            history.iter().filter(|m| m.is_user_visible()).count()
+        );
+        assert!(result.retained_context_tokens > 0);
+        let again = compact_messages_with_recent_history(
+            &model,
+            Some(&Estimator),
+            &Templates::default(),
+            &result.conversation,
+            manual,
+            RecentHistory {
+                turns: 2,
+                max_tokens: 512,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            again
+                .conversation
+                .agent_visible_messages()
+                .last()
+                .unwrap()
+                .as_concat_text(),
+            "Current request"
+        );
+    }
+    let oversized = Conversation::new_unvalidated([
+        Message::user().with_text("Old"),
+        Message::assistant().with_text("Answer"),
+        Message::user().with_text("Large recent document ".repeat(100)),
+    ]);
+    let result = compact_messages_with_recent_history(
+        &model,
+        Some(&Estimator),
+        &Templates::default(),
+        &oversized,
+        true,
+        RecentHistory {
+            turns: 2,
+            max_tokens: 512,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!result
+        .conversation
+        .agent_visible_messages()
+        .iter()
+        .any(|m| m.as_concat_text().contains("Large recent document")));
+}
