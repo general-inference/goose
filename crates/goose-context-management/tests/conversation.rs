@@ -577,11 +577,18 @@ async fn recent_history_retains_whole_turns_within_budget() {
             "Current request"
         );
     }
+    let mut recent_answer = Message::assistant().with_text("Latest answer");
+    recent_answer.metadata.usage = Some(Box::new(
+        goose_provider_types::conversation::message::MessageUsage {
+            input_tokens: Some(100),
+            ..Default::default()
+        },
+    ));
     let short = Conversation::new_unvalidated([
         Message::user().with_text("Earlier"),
         Message::assistant().with_text("Answer"),
         Message::user().with_text("Keep latest exact"),
-        Message::assistant().with_text("Latest answer"),
+        recent_answer,
     ]);
     let result = compact_messages_with_recent_history(
         &model,
@@ -604,6 +611,22 @@ async fn recent_history_retains_whole_turns_within_budget() {
             .unwrap()
             .as_concat_text(),
         "Latest answer"
+    );
+    assert!(result
+        .conversation
+        .agent_visible_messages()
+        .last()
+        .unwrap()
+        .metadata
+        .usage
+        .is_none());
+    assert_eq!(
+        result
+            .conversation
+            .iter()
+            .filter_map(|m| m.metadata.usage.as_ref())
+            .count(),
+        1
     );
     let oversized = Conversation::new_unvalidated([
         Message::user().with_text("Old"),

@@ -216,6 +216,9 @@ pub async fn compact_messages_with_recent_history(
         {
             let mut retained = original.agent_visible_content();
             retained.id = None;
+            // These are context copies, not new inference or billing records.
+            retained.metadata.usage = None;
+            retained.metadata.inference = None;
             retained.created = created;
             retained.metadata = retained.metadata.with_user_invisible();
             final_messages.push(retained);
