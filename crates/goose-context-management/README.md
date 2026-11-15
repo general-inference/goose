@@ -75,3 +75,12 @@ built-in tokenizer feature.
 Automatic triggering and bounded overflow recovery are available through
 `goose-agent`'s native `context-management` feature. These APIs are Rust APIs;
 this extraction does not add new Python or Kotlin bindings.
+
+Hosts that need exact recent context can call
+`conversation::compact_messages_with_recent_history` with a `RecentHistory`
+turn count and token budget. Whole user turns, including tool exchanges, are
+copied after the summary with agent-only visibility. The original transcript
+remains unchanged for users. A token estimator is required for bounded
+retention; disabled or oversized suffixes use the ordinary compaction policy.
+Recent messages also inform the summary so it remains coherent. Automatic
+compaction still preserves the active request when no bounded suffix fits.

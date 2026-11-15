@@ -33,6 +33,13 @@ pub struct CompactionResult {
     pub retained_context_tokens: i32,
 }
 
+/// Whole recent user turns to retain after the summary, bounded by estimated tokens.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RecentHistory {
+    pub turns: usize,
+    pub max_tokens: usize,
+}
+
 /// Summarize the visible history, archive the original messages, and preserve
 /// the active user request and turn context for automatic compaction.
 /// The caller persists the returned conversation and billable usage together.
@@ -43,9 +50,31 @@ pub async fn compact_messages(
     conversation: &Conversation,
     manual_compact: bool,
 ) -> Result<CompactionResult> {
+    compact_messages_with_recent_history(
+        model,
+        estimator,
+        templates,
+        conversation,
+        manual_compact,
+        RecentHistory::default(),
+    )
+    .await
+}
+
+/// Compact older history while retaining a bounded suffix of whole user turns.
+/// Recent turns still contribute to the summary, which keeps its account of the task coherent.
+pub async fn compact_messages_with_recent_history(
+    model: &dyn CompactionModel,
+    estimator: Option<&dyn TokenEstimator>,
+    templates: &Templates,
+    conversation: &Conversation,
+    manual_compact: bool,
+    recent: RecentHistory,
+) -> Result<CompactionResult> {
     info!("Performing message compaction");
 
     let messages = conversation.messages();
+    let retained_start = recent_start(messages, estimator, recent).await;
 
     let has_text_only = |msg: &Message| {
         let has_text = msg
@@ -62,40 +91,48 @@ pub async fn compact_messages(
     };
 
     // Turn-context events are agent-appended, never the message to preserve.
-    let (preserved_user_message, preserved_idx, is_most_recent) = if !manual_compact {
-        let found_msg = messages.iter().enumerate().rev().find_map(|(idx, msg)| {
-            if !msg.is_agent_visible()
-                || msg.is_turn_context()
-                || !matches!(msg.role, rmcp::model::Role::User)
-            {
-                return None;
+    let (preserved_user_message, preserved_idx, is_most_recent) =
+        if !manual_compact && retained_start.is_none() {
+            let found_msg = messages.iter().enumerate().rev().find_map(|(idx, msg)| {
+                if !msg.is_agent_visible()
+                    || msg.is_turn_context()
+                    || !matches!(msg.role, rmcp::model::Role::User)
+                {
+                    return None;
+                }
+
+                let projected = msg.agent_visible_content();
+                if !has_text_only(&projected) {
+                    return None;
+                }
+
+                let preserved = projected
+                    .content
+                    .into_iter()
+                    .filter(|content| matches!(content, MessageContent::Text(_)))
+                    .fold(
+                        Message::user().with_metadata(MessageMetadata::agent_only()),
+                        Message::with_content,
+                    );
+                Some((idx, preserved))
+            });
+
+            if let Some((idx, msg)) = found_msg {
+                let is_last = messages[idx + 1..].iter().all(Message::is_turn_context);
+                (Some(msg), Some(idx), is_last)
+            } else {
+                (None, None, false)
             }
-
-            let projected = msg.agent_visible_content();
-            if !has_text_only(&projected) {
-                return None;
-            }
-
-            let preserved = projected
-                .content
-                .into_iter()
-                .filter(|content| matches!(content, MessageContent::Text(_)))
-                .fold(
-                    Message::user().with_metadata(MessageMetadata::agent_only()),
-                    Message::with_content,
-                );
-            Some((idx, preserved))
-        });
-
-        if let Some((idx, msg)) = found_msg {
-            let is_last = messages[idx + 1..].iter().all(Message::is_turn_context);
-            (Some(msg), Some(idx), is_last)
         } else {
-            (None, None, false)
-        }
-    } else {
-        (None, None, false)
-    };
+            let is_last = messages
+                .iter()
+                .rev()
+                .find(|message| message.is_agent_visible() && !message.is_turn_context())
+                .is_some_and(|message| {
+                    matches!(message.role, rmcp::model::Role::User) && has_text_only(message)
+                });
+            (None, None, is_last)
+        };
 
     let messages_to_compact = messages.as_slice();
 
@@ -167,6 +204,24 @@ pub async fn compact_messages(
         }
     }
 
+    if let Some(start) = retained_start {
+        let created = final_messages
+            .iter()
+            .map(|message| message.created)
+            .max()
+            .unwrap_or_default();
+        for original in messages[start..]
+            .iter()
+            .filter(|message| message.is_agent_visible())
+        {
+            let mut retained = original.agent_visible_content();
+            retained.id = None;
+            retained.created = created;
+            retained.metadata = retained.metadata.with_user_invisible();
+            final_messages.push(retained);
+        }
+    }
+
     for message in final_messages.iter_mut().skip(messages.len()) {
         message.metadata.set_operation_note(
             "compaction",
@@ -198,4 +253,48 @@ pub async fn compact_messages(
         usage: summarization_usage,
         retained_context_tokens,
     })
+}
+
+async fn recent_start(
+    messages: &[Message],
+    estimator: Option<&dyn TokenEstimator>,
+    recent: RecentHistory,
+) -> Option<usize> {
+    let estimator = estimator?;
+    if recent.turns == 0 || recent.max_tokens == 0 {
+        return None;
+    }
+    let mut tokens = 0usize;
+    let mut turns = 0usize;
+    let mut start = None;
+    for (index, message) in messages.iter().enumerate().rev() {
+        if !message.is_agent_visible() {
+            continue;
+        }
+        tokens = tokens.saturating_add(
+            estimator
+                .count_chat_tokens("", std::slice::from_ref(message))
+                .await,
+        );
+        if tokens > recent.max_tokens {
+            break;
+        }
+        if (message.is_user_visible() || is_compaction_message(message))
+            && !message.is_turn_context()
+            && matches!(message.role, rmcp::model::Role::User)
+            && !message
+                .content
+                .iter()
+                .any(|content| matches!(content, MessageContent::ToolResponse(_)))
+        {
+            start = Some(index);
+            turns += 1;
+            if turns == recent.turns {
+                break;
+            }
+        }
+    }
+    // At least one earlier visible message must be summarized; retaining everything
+    // would leave no room and can retrigger automatic compaction immediately.
+    start.filter(|start| messages[..*start].iter().any(Message::is_agent_visible))
 }
