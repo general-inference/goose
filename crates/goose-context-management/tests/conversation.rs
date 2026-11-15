@@ -577,6 +577,34 @@ async fn recent_history_retains_whole_turns_within_budget() {
             "Current request"
         );
     }
+    let short = Conversation::new_unvalidated([
+        Message::user().with_text("Earlier"),
+        Message::assistant().with_text("Answer"),
+        Message::user().with_text("Keep latest exact"),
+        Message::assistant().with_text("Latest answer"),
+    ]);
+    let result = compact_messages_with_recent_history(
+        &model,
+        Some(&Estimator),
+        &Templates::default(),
+        &short,
+        true,
+        RecentHistory {
+            turns: 2,
+            max_tokens: 512,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        result
+            .conversation
+            .agent_visible_messages()
+            .last()
+            .unwrap()
+            .as_concat_text(),
+        "Latest answer"
+    );
     let oversized = Conversation::new_unvalidated([
         Message::user().with_text("Old"),
         Message::assistant().with_text("Answer"),
